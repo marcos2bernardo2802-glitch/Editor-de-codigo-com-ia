@@ -4,6 +4,7 @@ import {
   FolderOpen,
   ChevronRight,
   ChevronDown,
+  ChevronLeft,
   FileCode,
   FileText,
   Plus,
@@ -13,6 +14,8 @@ import {
   X,
   Layers,
   FolderPlus,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { ProjectFile, SupportedLanguage } from '../types';
 import { FileTreeNode, buildFileTree } from '../utils/fileTree';
@@ -298,12 +301,37 @@ export const FileTreeExplorer: React.FC<FileTreeExplorerProps> = ({
     );
   };
 
+  // Quando recolhido no modo projeto: exibe uma barra vertical compacta (32px) com botão para reabrir
+  if (!isOpen) {
+    return (
+      <aside
+        onClick={onToggleOpen}
+        className="w-8 shrink-0 border-r border-[var(--border)] bg-[var(--panel-2)] hover:bg-[var(--panel)] transition-colors flex flex-col items-center py-2 select-none cursor-pointer group"
+        title="Expandir árvore de arquivos do projeto (Ctrl+B)"
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleOpen();
+          }}
+          className="p-1 rounded text-[var(--muted)] group-hover:text-[var(--accent)] hover:bg-[var(--panel-2)] transition-colors cursor-pointer"
+          title="Expandir árvore de arquivos (Ctrl+B)"
+          aria-label="Expandir árvore de arquivos"
+        >
+          <PanelLeftOpen className="w-4 h-4" />
+        </button>
+        <div className="mt-3 flex items-center justify-center flex-1">
+          <span className="text-[10px] uppercase font-semibold tracking-widest text-[var(--muted)] group-hover:text-[var(--text)] [writing-mode:vertical-lr] rotate-180 transition-colors">
+            Arquivos ({files.length})
+          </span>
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside
-      className={`border-r border-[var(--border)] bg-[var(--panel)] flex flex-col shrink-0 transition-all duration-200 ${
-        isOpen ? 'w-56 sm:w-60' : 'w-0 hidden md:flex md:w-0 overflow-hidden'
-      }`}
-    >
+    <aside className="w-56 sm:w-60 border-r border-[var(--border)] bg-[var(--panel)] flex flex-col shrink-0 transition-all duration-200 overflow-hidden">
       {/* Explorer Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)] bg-[var(--panel-2)] shrink-0 select-none">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
@@ -319,7 +347,7 @@ export const FileTreeExplorer: React.FC<FileTreeExplorerProps> = ({
               setNewFilePath('');
               setIsAdding(true);
             }}
-            className="p-1 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors"
+            className="p-1 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors cursor-pointer"
             title="Novo arquivo (ex: src/App.tsx ou index.js)"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -327,10 +355,11 @@ export const FileTreeExplorer: React.FC<FileTreeExplorerProps> = ({
           <button
             type="button"
             onClick={onToggleOpen}
-            className="p-1 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded md:hidden"
-            title="Fechar explorador"
+            className="p-1 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors cursor-pointer"
+            title="Recolher árvore de arquivos (Ctrl+B)"
+            aria-label="Recolher árvore de arquivos"
           >
-            <X className="w-3.5 h-3.5" />
+            <PanelLeftClose className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

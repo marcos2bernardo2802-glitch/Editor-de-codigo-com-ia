@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   RotateCw,
   Monitor,
@@ -27,10 +27,36 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({ code, language
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [showConsole, setShowConsole] = useState<boolean>(false);
   const [logs, setLogs] = useState<PreviewLogItem[]>([]);
+  const [htmlContent, setHtmlContent] = useState<string>('');
+  const blobUrlsRef = useRef<string[]>([]);
 
-  const htmlContent = useMemo(() => {
-    return generatePreviewHtml(code, language, projectFiles);
-  }, [code, language, projectFiles]);
+  // Regenerates preview HTML, collecting created Blob URLs for ES modules and revoking old ones to prevent memory leaks
+  useEffect(() => {
+    if (blobUrlsRef.current.length > 0) {
+      blobUrlsRef.current.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      });
+      blobUrlsRef.current = [];
+    }
+
+    const createdUrls: string[] = [];
+    const html = generatePreviewHtml(code, language, projectFiles, createdUrls);
+    blobUrlsRef.current = createdUrls;
+    setHtmlContent(html);
+
+    return () => {
+      if (blobUrlsRef.current.length > 0) {
+        blobUrlsRef.current.forEach((url) => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        });
+        blobUrlsRef.current = [];
+      }
+    };
+  }, [code, language, projectFiles, refreshKey]);
 
   const deviceWidthMap: Record<DeviceMode, string> = {
     desktop: '100%',

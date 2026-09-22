@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, X, FileCode, FileText, Check, Edit2, PanelLeft } from 'lucide-react';
+import { Plus, X, FileCode, FileText, Check, Edit2, PanelLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { ProjectFile, SupportedLanguage } from '../types';
 import {
   detectLanguageFromName,
@@ -118,14 +118,22 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
         <button
           type="button"
           onClick={onToggleExplorer}
-          className={`p-1.5 rounded-md text-xs transition-colors cursor-pointer mr-1 shrink-0 ${
+          className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors cursor-pointer mr-1 shrink-0 ${
             isExplorerOpen
-              ? 'bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30'
-              : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] border border-transparent'
+              ? 'bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30 font-medium'
+              : 'bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] border border-[var(--border)]'
           }`}
-          title={isExplorerOpen ? 'Recolher painel de pastas' : 'Exibir árvore de pastas'}
+          title={isExplorerOpen ? 'Recolher árvore de arquivos (Ctrl+B)' : 'Expandir árvore de arquivos (Ctrl+B)'}
+          aria-label={isExplorerOpen ? 'Recolher árvore de arquivos' : 'Expandir árvore de arquivos'}
         >
-          <PanelLeft className="w-3.5 h-3.5" />
+          {isExplorerOpen ? (
+            <PanelLeftClose className="w-3.5 h-3.5" />
+          ) : (
+            <PanelLeftOpen className="w-3.5 h-3.5" />
+          )}
+          <span className="text-[11px] font-medium hidden md:inline">
+            {isExplorerOpen ? 'Recolher árvore' : 'Árvore'}
+          </span>
         </button>
       )}
 

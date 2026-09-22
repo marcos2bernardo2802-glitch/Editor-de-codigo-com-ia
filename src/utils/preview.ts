@@ -1,5 +1,6 @@
 import { SupportedLanguage, ProjectFile } from '../types';
 import { normalizeFilePath, extractFileNameFromPath } from './workspace';
+import { resolveJsModuleGraph, getFileDir } from './resolveModules';
 
 export const CONSOLE_INJECT_SCRIPT = `<script id="preview-console-bridge">
 (function() {
@@ -56,7 +57,7 @@ export function resolveRelativePath(baseDir: string, relativePath: string): stri
 /**
  * Finds a project file by resolved path, partial ending, or file name.
  */
-function findMatchingFile(
+export function findMatchingFile(
   projectFiles: ProjectFile[],
   targetPath: string
 ): ProjectFile | undefined {
@@ -82,17 +83,88 @@ function findMatchingFile(
   return found;
 }
 
-function isExternalUrl(url: string): boolean {
+export function isExternalUrl(url: string): boolean {
   return /^(?:[a-z]+:)?\/\//i.test(url) || url.startsWith('data:') || url.startsWith('blob:');
 }
 
 /**
+ * Resolves recursive @import statements in CSS files:
+ * - @import "x.css";
+ * - @import 'x.css';
+ * - @import url("x.css");
+ * - @import url(x.css);
+ * Ignores external URLs (http, https, //).
+ * Protects against circular imports using a visited Set.
+ */
+export function resolveCssImports(
+  cssContent: string,
+  currentFilePath: string,
+  allFiles: ProjectFile[],
+  visited: Set<string> = new Set(),
+  embeddedFileIds?: Set<string>
+): string {
+  const currentDir = getFileDir(currentFilePath);
+  const currentNorm = normalizeFilePath(currentFilePath).toLowerCase();
+  visited.add(currentNorm);
+
+  const importRegex = /@import\s+(?:url\(\s*(?:['"]([^'"]+)['"]|([^'")]+))\s*\)|['"]([^'"]+)['"])([^;]*);?/gi;
+
+  return cssContent.replace(importRegex, (fullMatch, url1, url2, url3, mediaQuery) => {
+    const rawUrl = (url1 || url2 || url3 || '').trim();
+
+    if (!rawUrl || isExternalUrl(rawUrl)) {
+      return fullMatch; // Keep external stylesheets (CDN, Google Fonts) intact
+    }
+
+    const resolvedPath = resolveRelativePath(currentDir, rawUrl);
+    const matchedFile = findMatchingFile(allFiles, resolvedPath);
+
+    if (!matchedFile) {
+      return `/* @import não encontrado no workspace: ${rawUrl} */`;
+    }
+
+    const matchedNorm = normalizeFilePath(matchedFile.path || matchedFile.name).toLowerCase();
+
+    if (visited.has(matchedNorm)) {
+      return `/* @import circular ignorado: ${rawUrl} */`;
+    }
+
+    visited.add(matchedNorm);
+    if (embeddedFileIds && matchedFile.id) {
+      embeddedFileIds.add(matchedFile.id);
+    }
+
+    // Recursively resolve any chained @import in the target file
+    const resolvedNestedCss = resolveCssImports(
+      matchedFile.content,
+      matchedFile.path || matchedFile.name,
+      allFiles,
+      visited,
+      embeddedFileIds
+    );
+
+    const cleanMedia = (mediaQuery || '').trim();
+    if (cleanMedia) {
+      return `/* Início @import: ${matchedFile.path || matchedFile.name} (${cleanMedia}) */\n@media ${cleanMedia} {\n${resolvedNestedCss}\n}\n/* Fim @import: ${matchedFile.path || matchedFile.name} */`;
+    }
+
+    return `/* Início @import: ${matchedFile.path || matchedFile.name} */\n${resolvedNestedCss}\n/* Fim @import: ${matchedFile.path || matchedFile.name} */`;
+  });
+}
+
+/**
  * Generates the preview HTML for the iframe.
+ * Supports:
+ * - Multi-file linking (<link rel="stylesheet">, <script src="...">)
+ * - ES modules (<script type="module" src="...">) via Blob URLs
+ * - Recursive CSS @import resolution
+ * - Collection of created Blob URLs for cleanup
  */
 export function generatePreviewHtml(
   code: string,
   language: SupportedLanguage,
-  projectFiles?: ProjectFile[]
+  projectFiles?: ProjectFile[],
+  createdBlobUrlsCollector?: string[]
 ): string {
   // If multi-file project is active
   if (projectFiles && projectFiles.length > 0) {
@@ -113,7 +185,7 @@ export function generatePreviewHtml(
         embeddedFileIds.add(mainHtmlFile.id);
       }
 
-      // 2. Intercept <link rel="stylesheet" href="..."> tags
+      // 2. Intercept <link rel="stylesheet" href="..."> tags & resolve recursive @import
       combinedHtml = combinedHtml.replace(/<link\b([^>]*?)>/gi, (match, attrs) => {
         const isStylesheet = /\brel=["']?stylesheet["']?/i.test(attrs);
         if (!isStylesheet) return match;
@@ -131,54 +203,127 @@ export function generatePreviewHtml(
 
         if (matchedFile) {
           embeddedFileIds.add(matchedFile.id);
-          return `<style data-source="${matchedFile.path || matchedFile.name}">\n/* Injetado de: ${matchedFile.path || matchedFile.name} */\n${matchedFile.content}\n</style>`;
+          const resolvedCss = resolveCssImports(
+            matchedFile.content,
+            matchedFile.path || matchedFile.name,
+            projectFiles,
+            new Set(),
+            embeddedFileIds
+          );
+          return `<style data-source="${matchedFile.path || matchedFile.name}">\n/* Injetado de: ${matchedFile.path || matchedFile.name} */\n${resolvedCss}\n</style>`;
         }
 
         return match;
       });
 
-      // 3. Intercept <script ... src="..."> tags
+      // 3. Intercept <script ... src="..."> tags (including type="module" with Blob URLs)
       combinedHtml = combinedHtml.replace(
         /<script\b([^>]*?)(?:\/>|>(.*?)<\/script>)/gis,
         (match, attrs, innerContent) => {
+          const isModule = /\btype=["']?module["']?/i.test(attrs);
           const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
-          if (!srcMatch) {
-            // Inline script, keep as is
+
+          if (srcMatch) {
+            const src = srcMatch[1];
+            if (isExternalUrl(src)) {
+              return match; // Keep external scripts intact
+            }
+
+            const resolvedPath = resolveRelativePath(htmlDir, src);
+            const matchedFile = findMatchingFile(projectFiles, resolvedPath);
+
+            if (matchedFile) {
+              embeddedFileIds.add(matchedFile.id);
+
+              if (isModule) {
+                // ES Module script: generate Blob URL graph
+                const { entryBlobUrl, createdBlobUrls, resolvedFileIds } = resolveJsModuleGraph(
+                  matchedFile,
+                  projectFiles
+                );
+                if (createdBlobUrlsCollector) {
+                  createdBlobUrlsCollector.push(...createdBlobUrls);
+                }
+                resolvedFileIds.forEach((id) => embeddedFileIds.add(id));
+
+                return `<script type="module" src="${entryBlobUrl}" data-source="${matchedFile.path || matchedFile.name}"></script>`;
+              } else {
+                // Classic script: inline as text
+                return `<script data-source="${matchedFile.path || matchedFile.name}">\n// Injetado de: ${matchedFile.path || matchedFile.name}\ntry {\n${matchedFile.content}\n} catch(err) {\n  console.error('[Script Error ${matchedFile.path || matchedFile.name}]:', err);\n}\n<\/script>`;
+              }
+            }
+
             return match;
           }
 
-          const src = srcMatch[1];
-          if (isExternalUrl(src)) {
-            return match; // Keep external scripts intact
-          }
-
-          const resolvedPath = resolveRelativePath(htmlDir, src);
-          const matchedFile = findMatchingFile(projectFiles, resolvedPath);
-
-          if (matchedFile) {
-            embeddedFileIds.add(matchedFile.id);
-            return `<script data-source="${matchedFile.path || matchedFile.name}">\n// Injetado de: ${matchedFile.path || matchedFile.name}\ntry {\n${matchedFile.content}\n} catch(err) {\n  console.error('[Script Error ${matchedFile.path || matchedFile.name}]:', err);\n}\n<\/script>`;
+          // Inline <script type="module">
+          if (isModule && innerContent && innerContent.trim()) {
+            const virtualFile: ProjectFile = {
+              id: 'inline-module-' + Math.random().toString(36).slice(2, 8),
+              name: 'inline-module.js',
+              path: htmlPath ? `${htmlDir}/inline-module.js` : 'inline-module.js',
+              language: 'javascript',
+              content: innerContent,
+              history: [],
+              historyIndex: 0,
+            };
+            const { entryBlobUrl, createdBlobUrls, resolvedFileIds } = resolveJsModuleGraph(
+              virtualFile,
+              projectFiles
+            );
+            if (createdBlobUrlsCollector) {
+              createdBlobUrlsCollector.push(...createdBlobUrls);
+            }
+            resolvedFileIds.forEach((id) => embeddedFileIds.add(id));
+            return `<script type="module" src="${entryBlobUrl}"></script>`;
           }
 
           return match;
         }
       );
 
-      // 4. Also bundle any remaining CSS files that weren't explicitly linked in the HTML
+      // 4. Bundle any remaining CSS files that weren't explicitly linked in the HTML
       const remainingCss = projectFiles
         .filter((f) => (f.language === 'css' || f.name.endsWith('.css')) && !embeddedFileIds.has(f.id))
-        .map((f) => `/* File: ${f.path || f.name} */\n${f.content}`)
+        .map((f) => {
+          embeddedFileIds.add(f.id);
+          const resolved = resolveCssImports(
+            f.content,
+            f.path || f.name,
+            projectFiles,
+            new Set(),
+            embeddedFileIds
+          );
+          return `/* File: ${f.path || f.name} */\n${resolved}`;
+        })
         .join('\n\n');
 
-      // 5. Also bundle any remaining JS files that weren't explicitly linked
-      const remainingJs = projectFiles
-        .filter(
-          (f) =>
-            (f.language === 'javascript' || f.language === 'typescript' || f.name.endsWith('.js') || f.name.endsWith('.ts')) &&
-            !embeddedFileIds.has(f.id)
-        )
-        .map((f) => `// File: ${f.path || f.name}\ntry {\n${f.content}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}`)
-        .join('\n\n');
+      // 5. Bundle any remaining JS files that weren't explicitly linked
+      const remainingJsFiles = projectFiles.filter(
+        (f) =>
+          (f.language === 'javascript' || f.language === 'typescript' || f.name.endsWith('.js') || f.name.endsWith('.ts')) &&
+          !embeddedFileIds.has(f.id)
+      );
+
+      const remainingJsScripts = remainingJsFiles
+        .map((f) => {
+          embeddedFileIds.add(f.id);
+          // Check if file uses ES modules (import/export)
+          const usesModules = /\b(import\s+|export\s+)/.test(f.content);
+          if (usesModules) {
+            const { entryBlobUrl, createdBlobUrls, resolvedFileIds } = resolveJsModuleGraph(
+              f,
+              projectFiles
+            );
+            if (createdBlobUrlsCollector) {
+              createdBlobUrlsCollector.push(...createdBlobUrls);
+            }
+            resolvedFileIds.forEach((id) => embeddedFileIds.add(id));
+            return `<script type="module" src="${entryBlobUrl}" data-source="${f.path || f.name}"></script>`;
+          }
+          return `<script data-source="${f.path || f.name}">\n// File: ${f.path || f.name}\ntry {\n${f.content}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}\n<\/script>`;
+        })
+        .join('\n');
 
       // Wrap if not a full HTML document
       if (!combinedHtml.includes('<html') && !combinedHtml.includes('<!DOCTYPE')) {
@@ -193,7 +338,7 @@ export function generatePreviewHtml(
 <body>
   ${combinedHtml}
   ${CONSOLE_INJECT_SCRIPT}
-  ${remainingJs ? `<script id="project-unlinked-scripts">\n${remainingJs}\n<\/script>` : ''}
+  ${remainingJsScripts ? `\n${remainingJsScripts}` : ''}
 </body>
 </html>`;
         return combinedHtml;
@@ -212,7 +357,7 @@ export function generatePreviewHtml(
       }
 
       // Inject console bridge & unlinked JS before body close
-      const scriptInjection = `${CONSOLE_INJECT_SCRIPT}\n${remainingJs ? `<script id="project-unlinked-scripts">\n${remainingJs}\n<\/script>` : ''}`;
+      const scriptInjection = `${CONSOLE_INJECT_SCRIPT}\n${remainingJsScripts}`;
       if (combinedHtml.includes('</body>')) {
         combinedHtml = combinedHtml.replace('</body>', `${scriptInjection}\n</body>`);
       } else {

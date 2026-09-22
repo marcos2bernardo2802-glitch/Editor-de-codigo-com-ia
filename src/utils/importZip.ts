@@ -7,7 +7,7 @@ import {
 } from './workspace';
 
 // Binary / media extensions to ignore for now
-const BINARY_EXTENSIONS = new Set([
+export const BINARY_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'tiff',
   'woff', 'woff2', 'ttf', 'eot', 'otf',
   'mp3', 'wav', 'ogg', 'mp4', 'webm', 'avi', 'mov',
@@ -17,7 +17,7 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 // Directories to skip
-const IGNORED_DIRECTORIES = [
+export const IGNORED_DIRECTORIES = [
   'node_modules/',
   '.git/',
   'dist/',
@@ -28,12 +28,12 @@ const IGNORED_DIRECTORIES = [
   '.idea/',
 ];
 
-function isBinaryFile(filename: string): boolean {
+export function isBinaryFile(filename: string): boolean {
   const ext = filename.split('.').pop()?.toLowerCase() || '';
   return BINARY_EXTENSIONS.has(ext);
 }
 
-function shouldSkipPath(path: string): boolean {
+export function shouldSkipPath(path: string): boolean {
   const normalized = normalizeFilePath(path);
   // System junk files
   if (normalized.endsWith('.DS_Store') || normalized.endsWith('Thumbs.db')) {

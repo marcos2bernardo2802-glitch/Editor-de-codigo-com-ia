@@ -14,6 +14,9 @@ import {
   FolderArchive,
   FolderDown,
   FolderUp,
+  Save,
+  HardDrive,
+  FolderCheck,
 } from 'lucide-react';
 import { ConnectionConfig, ThemeMode } from '../types';
 
@@ -33,6 +36,12 @@ interface HeaderProps {
   onImportZip?: (file: File) => void;
   onOpenSettings: () => void;
   onOpenTemplates: () => void;
+  localFolderConnected?: boolean;
+  localFolderName?: string | null;
+  saveMode?: 'auto' | 'manual';
+  isSavingLocal?: boolean;
+  onSaveLocalFolder?: () => void;
+  onOpenLocalFolderSettings?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -51,6 +60,12 @@ export const Header: React.FC<HeaderProps> = ({
   onImportZip,
   onOpenSettings,
   onOpenTemplates,
+  localFolderConnected = false,
+  localFolderName = null,
+  saveMode = 'manual',
+  isSavingLocal = false,
+  onSaveLocalFolder,
+  onOpenLocalFolderSettings,
 }) => {
   const [copied, setCopied] = useState(false);
   const zipInputRef = useRef<HTMLInputElement>(null);
@@ -99,18 +114,52 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Status indicator */}
-      <div className="hidden md:flex items-center gap-2 text-xs text-[var(--muted)]">
-        <span
-          className={`w-2 h-2 rounded-full transition-colors ${
-            status === 'connected'
-              ? 'bg-[var(--add)] ring-2 ring-[var(--add)]/20'
-              : status === 'testing'
-              ? 'bg-[var(--accent)] animate-pulse'
-              : 'bg-[var(--rem)]'
-          }`}
-        />
-        <span className="capitalize">{statusText}</span>
+      {/* Status indicator & Local folder indicator */}
+      <div className="hidden md:flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 text-[var(--muted)]">
+          <span
+            className={`w-2 h-2 rounded-full transition-colors ${
+              status === 'connected'
+                ? 'bg-[var(--add)] ring-2 ring-[var(--add)]/20'
+                : status === 'testing'
+                ? 'bg-[var(--accent)] animate-pulse'
+                : 'bg-[var(--rem)]'
+            }`}
+          />
+          <span className="capitalize">{statusText}</span>
+        </div>
+
+        {/* Local folder subtle status badge */}
+        {onOpenLocalFolderSettings && (
+          <button
+            id="btnHeaderLocalFolderStatus"
+            type="button"
+            onClick={onOpenLocalFolderSettings}
+            className={`flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+              localFolderConnected
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                : 'border-[var(--border)] bg-[var(--panel-2)]/60 text-[var(--muted)] hover:text-[var(--text)]'
+            }`}
+            title={
+              localFolderConnected
+                ? `Pasta local: ${localFolderName} (${saveMode === 'auto' ? 'Autosave ligado' : 'Salvar manual'}) — clique para abrir configurações`
+                : 'Armazenamento em memória (sem pasta local conectada) — clique para conectar pasta'
+            }
+          >
+            {localFolderConnected ? (
+              <>
+                <FolderCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span className="max-w-[100px] truncate font-medium">{localFolderName}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              </>
+            ) : (
+              <>
+                <HardDrive className="w-3 h-3 text-[var(--muted)] shrink-0" />
+                <span className="hidden lg:inline text-[10px]">Em memória</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Actions */}
@@ -193,6 +242,21 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <FolderDown className="w-3.5 h-3.5 text-[var(--accent)]" />
             <span className="hidden lg:inline">Exportar .zip</span>
+          </button>
+        )}
+
+        {/* Local Folder Save Button (Manual Mode) */}
+        {localFolderConnected && saveMode === 'manual' && onSaveLocalFolder && (
+          <button
+            id="btnSaveLocalFolder"
+            type="button"
+            onClick={onSaveLocalFolder}
+            disabled={isSavingLocal}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/60 rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+            title="Salvar alterações no disco local (Ctrl+S / Cmd+S)"
+          >
+            <Save className={`w-3.5 h-3.5 ${isSavingLocal ? 'animate-bounce' : ''}`} />
+            <span>{isSavingLocal ? 'Salvando...' : 'Salvar disco'}</span>
           </button>
         )}
 

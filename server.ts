@@ -440,6 +440,97 @@ function cleanCodeOutput(rawText: string): string {
   return cleaned.trim();
 }
 
+interface IncomingProjectFile {
+  path: string;
+  language?: string;
+  content: string;
+}
+
+/**
+ * Builds multi-file project context for AI prompts.
+ * Respects maxTotalChars limit while always including the active file in full.
+ */
+function buildProjectContext(
+  projectFiles: IncomingProjectFile[] | undefined,
+  activeFilePath: string | undefined,
+  maxTotalChars = 60000
+): { hasMultiFiles: boolean; contextText: string } {
+  if (!Array.isArray(projectFiles) || projectFiles.length <= 1) {
+    return { hasMultiFiles: false, contextText: "" };
+  }
+
+  const activePathNorm = (activeFilePath || "").trim().toLowerCase();
+
+  // 1. Árvore de arquivos do projeto
+  const treeLines = projectFiles.map((f) => {
+    const filePath = f.path || "sem-nome";
+    const isThisActive =
+      activePathNorm && filePath.trim().toLowerCase() === activePathNorm;
+    return `- ${filePath}${isThisActive ? " (arquivo ativo, foco do usuário)" : ""}`;
+  });
+
+  const treeHeader = `ESTRUTURA DO PROJETO (${projectFiles.length} arquivos):\n${treeLines.join("\n")}`;
+
+  // 2. Localiza o arquivo ativo para priorização total
+  let activeIndex = projectFiles.findIndex(
+    (f) => activePathNorm && (f.path || "").trim().toLowerCase() === activePathNorm
+  );
+  if (activeIndex === -1) {
+    activeIndex = 0;
+  }
+  const activeFile = projectFiles[activeIndex];
+  const activeFileLength = activeFile?.content ? activeFile.content.length : 0;
+  let remainingBudget = Math.max(maxTotalChars - activeFileLength, 0);
+
+  const includedFileBlocks: string[] = [];
+  const omittedFiles: string[] = [];
+
+  for (let i = 0; i < projectFiles.length; i++) {
+    const file = projectFiles[i];
+    const isThisActive = i === activeIndex;
+    const filePath = file.path || `arquivo-${i + 1}`;
+    const fileLang = file.language || "text";
+    const fileContent = typeof file.content === "string" ? file.content : "";
+
+    if (isThisActive) {
+      // O arquivo ativo é sempre incluído por inteiro
+      includedFileBlocks.push(
+        `--- Arquivo: ${filePath} (ARQUIVO ATIVO, FOCO DO USUÁRIO) [${fileLang}] ---\n\`\`\`${fileLang}\n${fileContent}\n\`\`\``
+      );
+    } else {
+      if (remainingBudget >= 200) {
+        if (fileContent.length <= remainingBudget) {
+          remainingBudget -= fileContent.length;
+          includedFileBlocks.push(
+            `--- Arquivo: ${filePath} [${fileLang}] ---\n\`\`\`${fileLang}\n${fileContent}\n\`\`\``
+          );
+        } else {
+          // Trunca o arquivo para caber no orçamento restante
+          const truncated = fileContent.slice(0, remainingBudget);
+          remainingBudget = 0;
+          includedFileBlocks.push(
+            `--- Arquivo: ${filePath} [${fileLang}] (parcial, truncado por limite de tamanho) ---\n\`\`\`${fileLang}\n${truncated}\n... [restante do arquivo omitido por limite de tamanho]\n\`\`\``
+          );
+          omittedFiles.push(`${filePath} (parcialmente truncado)`);
+        }
+      } else {
+        omittedFiles.push(filePath);
+      }
+    }
+  }
+
+  let warningSection = "";
+  if (omittedFiles.length > 0) {
+    warningSection = `\nAVISO: Os seguintes arquivos foram omitidos ou truncados por limite de contexto (${maxTotalChars} caracteres):\n${omittedFiles
+      .map((name) => `• ${name}`)
+      .join("\n")}\n`;
+  }
+
+  const contextText = `${treeHeader}\n\nCONTEÚDO DOS ARQUIVOS DO PROJETO:\n${includedFileBlocks.join("\n\n")}${warningSection ? `\n\n${warningSection}` : ""}`;
+
+  return { hasMultiFiles: true, contextText };
+}
+
 // 1. Planning / Chat Endpoint: Conversational mentoring without rewriting code
 app.post("/api/ai/plan", async (req, res) => {
   try {
@@ -456,6 +547,8 @@ app.post("/api/ai/plan", async (req, res) => {
       apiKey,
       geminiKeys,
       apiKeys,
+      projectFiles,
+      activeFilePath,
     } = req.body;
 
     const userText = (instruction || message || customPrompt || "").trim();
@@ -466,13 +559,28 @@ app.post("/api/ai/plan", async (req, res) => {
     const candidateKeys = resolveCandidateKeys(geminiKeys || apiKeys || apiKey);
     const targetCode = scope === "selection" && selectedText ? selectedText : code;
 
-    const planSystemPrompt = `Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.
+    const multiFileContext = buildProjectContext(projectFiles, activeFilePath, 60000);
+
+    let planSystemPrompt = "";
+    if (multiFileContext.hasMultiFiles) {
+      planSystemPrompt = `Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.
+
+Você possui visibilidade de todo o projeto aberto pelo usuário no workspace. O usuário está com o arquivo "${activeFilePath || "ativo"}" aberto no editor no momento.
+
+${multiFileContext.contextText}`;
+
+      if (scope === "selection" && selectedText) {
+        planSystemPrompt += `\n\nTrecho específico selecionado pelo usuário no arquivo ativo para referência:\n\`\`\`${language || ""}\n${selectedText}\n\`\`\``;
+      }
+    } else {
+      planSystemPrompt = `Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.
 
 Linguagem do projeto: ${language || "desconhecida"}
 Contexto de código atual para referência:
 \`\`\`${language || ""}
 ${targetCode ? targetCode.slice(0, 15000) : "// Arquivo em branco"}
 \`\`\``;
+    }
 
     const promptParts: any[] = [];
     if (Array.isArray(images) && images.length > 0) {
@@ -550,6 +658,8 @@ app.post("/api/ai/edit", async (req, res) => {
       apiKey,
       geminiKeys,
       apiKeys,
+      projectFiles,
+      activeFilePath,
     } = req.body;
 
     if (!code && code !== "" && !selectedText) {
@@ -560,11 +670,32 @@ app.post("/api/ai/edit", async (req, res) => {
     }
 
     const candidateKeys = resolveCandidateKeys(geminiKeys || apiKeys || apiKey);
+    const multiFileContext = buildProjectContext(projectFiles, activeFilePath, 60000);
 
     // Handle code explanation intent
     if (intent === "explain") {
       const targetCode = selectedText || code;
-      const explainPrompt = `Você é um mentor especialista em programação.
+      let explainPrompt = "";
+      if (multiFileContext.hasMultiFiles) {
+        explainPrompt = `Você é um mentor especialista em programação.
+Sua missão é explicar de maneira clara, didática, concisa e prática em português o seguinte código ou trecho do arquivo ativo "${activeFilePath || "ativo"}", considerando o contexto de todo o projeto.
+
+Diretrizes:
+- Explique o objetivo geral e o que cada parte relevante faz.
+- Destaque fluxos lógicos, integração com outros arquivos do projeto e padrões utilizados.
+- Se houver pontos de melhoria, mencione brevemente como sugestão.
+- Use formatação clara com tópicos e trechos de código em destaque.
+
+Linguagem: ${language || "desconhecida"}
+Arquivo ativo: ${activeFilePath || "ativo"}
+Pergunta/Instrução do usuário: "${instruction}"
+
+${multiFileContext.contextText}
+
+--- CÓDIGO A SER EXPLICADO (${activeFilePath || "arquivo ativo"}) ---
+${targetCode}`;
+      } else {
+        explainPrompt = `Você é um mentor especialista em programação.
 Sua missão é explicar de maneira clara, didática, concisa e prática em português o seguinte código ou trecho.
 
 Diretrizes:
@@ -578,6 +709,7 @@ Pergunta/Instrução do usuário: "${instruction}"
 
 --- CÓDIGO A SER EXPLICADO ---
 ${targetCode}`;
+      }
 
       const { result, usedKeyMask } = await executeWithGeminiFailover(
         candidateKeys,
@@ -611,7 +743,35 @@ ${targetCode}`;
     let prompt = "";
 
     if (scope === "selection" && selectedText) {
-      prompt = `Você é um assistente especialista de edição cirúrgica de código de alto nível.
+      if (multiFileContext.hasMultiFiles) {
+        prompt = `Você é um assistente especialista de edição cirúrgica de código de alto nível.
+Sua tarefa é modificar ESTRITAMENTE o trecho selecionado de código com base na instrução do usuário.
+O trecho selecionado faz parte do arquivo ativo (${activeFilePath || "arquivo ativo"}) de um projeto com múltiplos arquivos. Você tem a visão de todo o projeto para referência de tipos, dependências e padrões, mas a modificação deve ser aplicada ESTRITAMENTE no trecho do arquivo ativo.
+
+REGRAS CRÍTICAS:
+1. Retorne APENAS o trecho selecionado resultante modificado que irá substituir a seleção original no arquivo ativo.
+2. NÃO repita o restante do arquivo ativo nem de outros arquivos.
+3. NÃO inclua explicações, comentários introdutórios nem conclusões.
+4. NÃO envolva em blocos markdown com crases triplas (\`\`\`). Retorne apenas o código puro.
+5. Mantenha exatamente a indentação e o estilo necessários para se encaixar de forma limpa no código ao redor.
+
+Linguagem do arquivo ativo: ${language || "desconhecida/mista"}
+Arquivo ativo: ${activeFilePath || "arquivo ativo"}
+
+${multiFileContext.contextText}
+
+--- CONTEXTO DO ARQUIVO ATIVO COMPLETO (${activeFilePath || "arquivo ativo"}) ---
+${code}
+
+--- TRECHO SELECIONADO A SER MODIFICADO NO ARQUIVO ATIVO ---
+${selectedText}
+
+--- INSTRUÇÃO DE EDIÇÃO ---
+${instruction}
+
+Devolva apenas o novo trecho editado pronto para substituir o trecho selecionado no arquivo ativo:`;
+      } else {
+        prompt = `Você é um assistente especialista de edição cirúrgica de código de alto nível.
 Sua tarefa é modificar ESTRITAMENTE o trecho selecionado de código com base na instrução do usuário.
 O trecho selecionado faz parte de um arquivo maior (contexto fornecido para referência).
 
@@ -634,8 +794,34 @@ ${selectedText}
 ${instruction}
 
 Devolva apenas o novo trecho editado pronto para substituir o trecho selecionado:`;
+      }
     } else {
-      prompt = `Você é um assistente especialista de edição de código de alto nível.
+      if (multiFileContext.hasMultiFiles) {
+        prompt = `Você é um assistente especialista de edição de código de alto nível.
+Sua tarefa é modificar o arquivo ativo (${activeFilePath || "arquivo ativo"}) estritamente de acordo com a instrução do usuário.
+Você tem acesso à estrutura e arquivos de todo o projeto para contexto arquitetural, dependências e estilos, mas DEVE RETORNAR APENAS o código do arquivo ativo (${activeFilePath || "arquivo ativo"}).
+
+REGRAS CRÍTICAS:
+1. Retorne APENAS o código completo resultante atualizado do arquivo ativo (${activeFilePath || "arquivo ativo"}).
+2. NÃO inclua explicações, comentários introdutórios nem conclusões.
+3. NÃO envolva em blocos markdown com crases triplas (\`\`\`). Retorne apenas o código puro do arquivo ativo.
+4. Mantenha o estilo de indentação, formatação e convenções existentes do código original.
+5. Aplique as modificações necessárias com precisão cirúrgica no arquivo ativo.
+
+Linguagem do arquivo ativo: ${language || "desconhecida/mista"}
+Arquivo ativo a ser editado: ${activeFilePath || "arquivo ativo"}
+
+${multiFileContext.contextText}
+
+--- CÓDIGO ORIGINAL DO ARQUIVO ATIVO A SER MODIFICADO (${activeFilePath || "arquivo ativo"}) ---
+${code}
+
+--- INSTRUÇÃO DE EDIÇÃO ---
+${instruction}
+
+Devolva exatamente o código completo atualizado do arquivo ativo (${activeFilePath || "arquivo ativo"}) agora:`;
+      } else {
+        prompt = `Você é um assistente especialista de edição de código de alto nível.
 Sua tarefa é modificar o código fornecido estritamente de acordo com a instrução do usuário.
 
 REGRAS CRÍTICAS:
@@ -654,6 +840,7 @@ ${code}
 ${instruction}
 
 Devolva exatamente o código completo atualizado agora:`;
+      }
     }
 
     const { result, usedKeyMask } = await executeWithGeminiFailover(

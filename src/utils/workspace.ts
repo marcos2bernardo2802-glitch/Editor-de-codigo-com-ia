@@ -215,3 +215,95 @@ if (colorBtn) {
     historyIndex: 0,
   },
 ];
+
+export interface ProjectContextSummary {
+  hasMultiFiles: boolean;
+  contextText: string;
+}
+
+/**
+ * Constrói o contexto textual de múltiplos arquivos para ser injetado nos prompts da IA (Gemini ou Colab/Ollama).
+ * Inclui árvore de caminhos, conteúdo dos arquivos com cabeçalhos e controle de limite de caracteres.
+ */
+export function buildProjectContextPrompt(
+  files: Array<{ path?: string; name?: string; language?: string; content?: string }> | undefined,
+  activeFilePath?: string,
+  maxTotalChars = 60000
+): ProjectContextSummary {
+  if (!Array.isArray(files) || files.length <= 1) {
+    return { hasMultiFiles: false, contextText: '' };
+  }
+
+  const activePathNorm = (activeFilePath || '').trim().toLowerCase();
+
+  // 1. Árvore de arquivos do projeto
+  const treeLines = files.map((f) => {
+    const filePath = f.path || f.name || 'sem-nome';
+    const isThisActive =
+      activePathNorm && filePath.trim().toLowerCase() === activePathNorm;
+    return `- ${filePath}${isThisActive ? ' (arquivo ativo, foco do usuário)' : ''}`;
+  });
+
+  const treeHeader = `ESTRUTURA DO PROJETO (${files.length} arquivos):\n${treeLines.join('\n')}`;
+
+  // 2. Localiza o arquivo ativo para priorização total
+  let activeIndex = files.findIndex(
+    (f) => activePathNorm && (f.path || f.name || '').trim().toLowerCase() === activePathNorm
+  );
+  if (activeIndex === -1) {
+    activeIndex = 0;
+  }
+
+  const activeFile = files[activeIndex];
+  const activeFileLength = activeFile?.content ? activeFile.content.length : 0;
+  let remainingBudget = Math.max(maxTotalChars - activeFileLength, 0);
+
+  const includedFileBlocks: string[] = [];
+  const omittedFiles: string[] = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const isThisActive = i === activeIndex;
+    const filePath = file.path || file.name || `arquivo-${i + 1}`;
+    const fileLang = file.language || 'text';
+    const fileContent = typeof file.content === 'string' ? file.content : '';
+
+    if (isThisActive) {
+      // O arquivo ativo é sempre incluído por inteiro
+      includedFileBlocks.push(
+        `--- Arquivo: ${filePath} (ARQUIVO ATIVO, FOCO DO USUÁRIO) [${fileLang}] ---\n\`\`\`${fileLang}\n${fileContent}\n\`\`\``
+      );
+    } else {
+      if (remainingBudget >= 200) {
+        if (fileContent.length <= remainingBudget) {
+          remainingBudget -= fileContent.length;
+          includedFileBlocks.push(
+            `--- Arquivo: ${filePath} [${fileLang}] ---\n\`\`\`${fileLang}\n${fileContent}\n\`\`\``
+          );
+        } else {
+          // Trunca o arquivo para caber no orçamento restante
+          const truncated = fileContent.slice(0, remainingBudget);
+          remainingBudget = 0;
+          includedFileBlocks.push(
+            `--- Arquivo: ${filePath} [${fileLang}] (parcial, truncado por limite de tamanho) ---\n\`\`\`${fileLang}\n${truncated}\n... [restante do arquivo omitido por limite de tamanho]\n\`\`\``
+          );
+          omittedFiles.push(`${filePath} (parcialmente truncado)`);
+        }
+      } else {
+        omittedFiles.push(filePath);
+      }
+    }
+  }
+
+  let warningSection = '';
+  if (omittedFiles.length > 0) {
+    warningSection = `\nAVISO: Os seguintes arquivos foram omitidos ou truncados por limite de contexto (${maxTotalChars} caracteres):\n${omittedFiles
+      .map((name) => `• ${name}`)
+      .join('\n')}\n`;
+  }
+
+  const contextText = `${treeHeader}\n\nCONTEÚDO DOS ARQUIVOS DO PROJETO:\n${includedFileBlocks.join('\n\n')}${warningSection ? `\n\n${warningSection}` : ''}`;
+
+  return { hasMultiFiles: true, contextText };
+}
+

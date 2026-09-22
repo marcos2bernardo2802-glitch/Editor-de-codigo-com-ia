@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
@@ -31,6 +31,8 @@ import {
   ShieldCheck,
   Wand2,
   History,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { LivePreviewPane } from './LivePreviewPane';
 import { FileTabBar } from './FileTabBar';
@@ -111,6 +113,20 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(true);
   // Toggle file tree explorer visibility
   const [isExplorerOpen, setIsExplorerOpen] = useState<boolean>(true);
+
+  // Atalho de teclado Ctrl+B / Cmd+B para alternar a árvore de arquivos no modo projeto
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        if (workspaceMode === 'project') {
+          e.preventDefault();
+          setIsExplorerOpen((prev) => !prev);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [workspaceMode]);
 
   // Run real-time syntax diagnostics
   const diagnostics = useMemo(() => {
@@ -266,6 +282,31 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               <span className="hidden sm:inline">Projeto ({files.length})</span>
             </button>
           </div>
+
+          {/* Toggle Retract File Tree Explorer in Project Mode */}
+          {workspaceMode === 'project' && (
+            <button
+              id="btnToggleFileExplorerSubheader"
+              type="button"
+              onClick={() => setIsExplorerOpen(!isExplorerOpen)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
+                isExplorerOpen
+                  ? 'bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]'
+                  : 'bg-[var(--panel-2)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)]'
+              }`}
+              title={isExplorerOpen ? 'Recolher árvore de arquivos para liberar espaço (Ctrl+B)' : 'Expandir árvore de arquivos do projeto (Ctrl+B)'}
+              aria-label={isExplorerOpen ? 'Recolher árvore de arquivos' : 'Expandir árvore de arquivos'}
+            >
+              {isExplorerOpen ? (
+                <PanelLeftClose className="w-3.5 h-3.5" />
+              ) : (
+                <PanelLeftOpen className="w-3.5 h-3.5" />
+              )}
+              <span className="hidden sm:inline">
+                {isExplorerOpen ? 'Recolher árvore' : 'Árvore'}
+              </span>
+            </button>
+          )}
 
           {/* Diagnostics Status Indicator (Sugestão 4: Diagnóstico de Erros) */}
           <button
