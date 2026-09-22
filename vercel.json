@@ -1,0 +1,24 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/proxy",
+      "destination": "/api/proxy"
+    },
+    {
+      "source": "/api/ai/plan",
+      "destination": "/api/ai/plan"
+    },
+    {
+      "source": "/api/ai/edit",
+      "destination": "/api/ai/edit"
+    },
+    {
+      "source": "/api/ai/test-key",
+      "destination": "/api/ai/test-key"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

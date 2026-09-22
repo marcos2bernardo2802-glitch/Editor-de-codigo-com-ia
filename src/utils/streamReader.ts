@@ -211,12 +211,39 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
             // Linha SSE não-JSON ou parcial; ignora
           }
         }
-        // Formato NDJSON nativo do Ollama (/api/chat ou /api/generate)
+        // Formato NDJSON nativo do Ollama (/api/chat ou /api/generate) ou JSON empacotado por proxy
         else if (line.startsWith('{') && line.endsWith('}')) {
           try {
             const parsed = JSON.parse(line);
 
             if (parsed.done === true) {
+              isDone = true;
+            }
+
+            // Se o proxy encapsulou o stream SSE dentro de { text: "data: ...\n\ndata: ..." }
+            if (typeof parsed.text === 'string' && parsed.text.includes('data:')) {
+              const innerLines = parsed.text.split('\n');
+              for (const innerRaw of innerLines) {
+                const inner = innerRaw.trim();
+                if (inner.startsWith('data:')) {
+                  const dataPayload = inner.slice(5).trim();
+                  if (dataPayload === '[DONE]') {
+                    isDone = true;
+                    continue;
+                  }
+                  try {
+                    const innerParsed = JSON.parse(dataPayload);
+                    const delta = innerParsed.choices?.[0]?.delta;
+                    if (delta) {
+                      if (delta.thinking) accumulatedThinking += delta.thinking;
+                      if (delta.reasoning_content) accumulatedThinking += delta.reasoning_content;
+                      if (delta.content) accumulatedContent += delta.content;
+                    }
+                  } catch {}
+                }
+              }
+            } else if (typeof parsed.text === 'string' && parsed.text.trim()) {
+              accumulatedContent += parsed.text;
               isDone = true;
             }
 
@@ -236,12 +263,17 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
               }
               accumulatedContent += parsed.response;
             }
-            // Outros esquemas JSON compatíveis
+            // Outros esquemas JSON compatíveis com delta
             else if (parsed.choices?.[0]?.delta) {
               const d = parsed.choices[0].delta;
               if (d.thinking) accumulatedThinking += d.thinking;
               if (d.reasoning_content) accumulatedThinking += d.reasoning_content;
               if (d.content) accumulatedContent += d.content;
+            }
+            // Resposta OpenAI não-streaming { choices: [{ message: { content: "..." } }] }
+            else if (parsed.choices?.[0]?.message?.content) {
+              accumulatedContent += parsed.choices[0].message.content;
+              isDone = true;
             }
           } catch {
             // JSON parcial ou malformado na linha

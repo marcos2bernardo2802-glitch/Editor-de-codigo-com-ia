@@ -32,6 +32,7 @@ import { importProjectFromZip } from './utils/importZip';
 import { processDroppedData } from './utils/dropHandler';
 import { processImageFiles } from './utils/imageResize';
 import { getShortModelName } from './utils/modelNames';
+import { callGeminiClientDirect } from './utils/geminiClient';
 import {
   isFileSystemAccessSupported,
   openLocalFolder,
@@ -1220,38 +1221,79 @@ ${userPromptText}`
       if (currentMode === 'plan') {
         // === MODO PLANEJAMENTO (Apenas conversa/mentoria, sem alteração de código) ===
         if (activeProvider === 'gemini') {
-          const res = await fetch('/api/ai/plan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              instruction: effectiveInstruction,
-              message: effectiveInstruction,
-              code: currentCode,
-              selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
-              scope: isSelection ? 'selection' : 'full',
-              language,
-              model: config.geminiModel || 'gemini-3.8-flash',
-              images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
-              apiKeys: config.geminiKeys || [],
-              geminiKeys: config.geminiKeys || [],
-              projectFiles: projectFilesPayload,
-              activeFilePath,
-            }),
-          });
+          let planText = '';
+          let usedKeyMask: string | undefined;
 
-          const data = await safeReadJsonResponse(res);
-          if (!res.ok) {
-            throw new Error(data.error || `Erro do servidor: ${res.status}`);
+          try {
+            const res = await fetch('/api/ai/plan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                instruction: effectiveInstruction,
+                message: effectiveInstruction,
+                code: currentCode,
+                selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
+                scope: isSelection ? 'selection' : 'full',
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+                apiKeys: config.geminiKeys || [],
+                geminiKeys: config.geminiKeys || [],
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+              }),
+            });
+
+            if (res.status === 404) {
+              const fallback = await callGeminiClientDirect({
+                instruction: effectiveInstruction,
+                code: currentCode,
+                selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                keys: config.geminiKeys || [],
+                mode: 'plan',
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+                images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+              });
+              planText = fallback.text;
+            } else {
+              const data = await safeReadJsonResponse(res);
+              if (!res.ok) {
+                throw new Error(data.error || `Erro do servidor: ${res.status}`);
+              }
+              planText = data.reply || data.text || 'Sem resposta do assistente de planejamento.';
+              usedKeyMask = data.usedKeyMask || data.usedKey;
+            }
+          } catch (apiErr: any) {
+            if (config.geminiKeys && config.geminiKeys.length > 0) {
+              const fallback = await callGeminiClientDirect({
+                instruction: effectiveInstruction,
+                code: currentCode,
+                selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                keys: config.geminiKeys,
+                mode: 'plan',
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+                images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+              });
+              planText = fallback.text;
+            } else {
+              throw apiErr;
+            }
           }
 
           const planMsg: ChatMessage = {
             id: `plan-${Date.now()}`,
             type: 'explanation',
-            text: data.reply || data.text || 'Sem resposta do assistente de planejamento.',
+            text: planText || 'Sem resposta do assistente de planejamento.',
             mode: 'plan',
             timestamp: Date.now(),
             provider: `${config.geminiModel || 'Gemini'} (Planejamento)`,
-            usedKeyMask: data.usedKeyMask || data.usedKey,
+            usedKeyMask,
           };
           setMessages((prev) => [...prev, planMsg]);
           setStatus('connected');
@@ -1451,31 +1493,71 @@ ${effectiveInstruction}`
       } else {
         // === MODO EXECUÇÃO (Gera proposta de edição e diff para aprovação) ===
         if (activeProvider === 'gemini') {
-          const res = await fetch('/api/ai/edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              code: currentCode,
-              selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
-              scope: isSelection ? 'selection' : 'full',
-              instruction: effectiveInstruction,
-              language,
-              model: config.geminiModel || 'gemini-3.8-flash',
-              images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
-              apiKeys: config.geminiKeys || [],
-              geminiKeys: config.geminiKeys || [],
-              projectFiles: projectFilesPayload,
-              activeFilePath,
-            }),
-          });
+          let returnedSnippetOrCode = '';
+          let usedKeyMask: string | undefined;
 
-          const data = await safeReadJsonResponse(res);
-          if (!res.ok) {
-            throw new Error(data.error || `Erro do servidor: ${res.status}`);
+          try {
+            const res = await fetch('/api/ai/edit', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                code: currentCode,
+                selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
+                scope: isSelection ? 'selection' : 'full',
+                instruction: effectiveInstruction,
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+                apiKeys: config.geminiKeys || [],
+                geminiKeys: config.geminiKeys || [],
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+              }),
+            });
+
+            if (res.status === 404) {
+              const fallback = await callGeminiClientDirect({
+                instruction: effectiveInstruction,
+                code: currentCode,
+                selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                keys: config.geminiKeys || [],
+                mode: 'edit',
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+                images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+              });
+              returnedSnippetOrCode = fallback.text;
+            } else {
+              const data = await safeReadJsonResponse(res);
+              if (!res.ok) {
+                throw new Error(data.error || `Erro do servidor: ${res.status}`);
+              }
+              returnedSnippetOrCode = data.code;
+              usedKeyMask = data.usedKeyMask;
+            }
+          } catch (apiErr: any) {
+            if (config.geminiKeys && config.geminiKeys.length > 0) {
+              const fallback = await callGeminiClientDirect({
+                instruction: effectiveInstruction,
+                code: currentCode,
+                selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                keys: config.geminiKeys,
+                mode: 'edit',
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+                images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+              });
+              returnedSnippetOrCode = fallback.text;
+            } else {
+              throw apiErr;
+            }
           }
 
-          const returnedSnippetOrCode = data.code;
-          if (typeof returnedSnippetOrCode !== 'string') {
+          if (typeof returnedSnippetOrCode !== 'string' || !returnedSnippetOrCode.trim()) {
             throw new Error('A IA não retornou um formato de código válido.');
           }
 
@@ -1497,7 +1579,7 @@ ${effectiveInstruction}`
               discarded: false,
               timestamp: Date.now(),
               provider: `${config.geminiModel || 'Gemini'} (Modo Seleção)`,
-              usedKeyMask: data.usedKeyMask,
+              usedKeyMask,
               mode: 'execute',
             };
 
@@ -1514,7 +1596,7 @@ ${effectiveInstruction}`
               discarded: false,
               timestamp: Date.now(),
               provider: `${config.geminiModel || 'Gemini'} (Modo Completo)`,
-              usedKeyMask: data.usedKeyMask,
+              usedKeyMask,
               mode: 'execute',
             };
 
@@ -1772,7 +1854,8 @@ ${effectiveInstruction}`;
         errMsg.includes('não está ativo nesta hospedagem') ||
         (errMsg.includes('404') && (errMsg.includes('/api/') || errMsg.includes('proxy')));
 
-      const isModelNotFound =
+      const isColabModelNotFound =
+        activeProvider === 'colab' &&
         !isBackendMissing &&
         (errMsg.includes('MODEL_NOT_FOUND') ||
         errMsg.toLowerCase().includes('model not found') ||
@@ -1789,7 +1872,7 @@ ${effectiveInstruction}`;
           '⚠️ O servidor backend Node.js (/api/*) não está rodando nesta hospedagem (Erro 404 Vercel / Edge).\n\n' +
           '• Para conectar ao Google Colab / ngrok: abra as Configurações (aba "Google Colab / ngrok" > "Avançado") e desmarque a opção "Usar proxy do servidor" para que seu navegador faça a requisição direta ao ngrok.\n' +
           '• Para utilizar todas as rotas de backend (incluindo Gemini e proxy): execute o projeto localmente com "npm run dev" (na porta 3000) ou faça deploy em uma plataforma Node.js (Render, Railway, Fly.io).';
-      } else if (isModelNotFound) {
+      } else if (isColabModelNotFound) {
         const detected = Array.isArray(config.detectedModels) && config.detectedModels.length > 0
           ? config.detectedModels
           : [];

@@ -323,6 +323,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           model: resolvedGeminiModel,
         }),
       });
+
+      if (res.status === 404) {
+        try {
+          const { GoogleGenAI } = await import('@google/genai');
+          const ai = new GoogleGenAI({ apiKey: keyToTest.trim() });
+          await ai.models.generateContent({
+            model: resolvedGeminiModel || 'gemini-3.8-flash',
+            contents: 'ping',
+            config: { maxOutputTokens: 2 },
+          });
+          setIndividualKeyTests((prev) => ({
+            ...prev,
+            [idx]: { status: 'valid', message: 'Válida e pronta para uso (verificada diretamente)' },
+          }));
+          return;
+        } catch (directErr: any) {
+          const msg = directErr.message || '';
+          const isQuota = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
+          setIndividualKeyTests((prev) => ({
+            ...prev,
+            [idx]: {
+              status: isQuota ? 'quota' : 'invalid',
+              message: msg || 'Chave inválida ou limite excedido',
+            },
+          }));
+          return;
+        }
+      }
+
       const data = await res.json();
       if (res.ok && data.valid) {
         setIndividualKeyTests((prev) => ({

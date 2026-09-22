@@ -1,3 +1,14 @@
+import { Readable } from 'stream';
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '25mb',
+    },
+    responseLimit: false,
+  },
+};
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -33,6 +44,24 @@ export default async function handler(req: any, res: any) {
     const fetchResponse = await fetch(url, fetchOptions);
     const contentType = fetchResponse.headers.get('content-type') || '';
 
+    const isStream =
+      (body && typeof body === 'object' && Boolean(body.stream)) ||
+      contentType.includes('event-stream') ||
+      contentType.includes('x-ndjson');
+
+    // Se for stream e o corpo for legível, faz pipe direto para res
+    if (isStream && fetchResponse.body && fetchResponse.ok) {
+      res.status(fetchResponse.status || 200);
+      fetchResponse.headers.forEach((val, key) => {
+        if (key.toLowerCase() !== 'content-encoding') {
+          res.setHeader(key, val);
+        }
+      });
+      // @ts-ignore
+      Readable.fromWeb(fetchResponse.body).pipe(res);
+      return;
+    }
+
     if (contentType.includes('application/json')) {
       const data = await fetchResponse.json();
       return res.status(fetchResponse.status).json(data);
@@ -42,6 +71,11 @@ export default async function handler(req: any, res: any) {
         const parsed = JSON.parse(text);
         return res.status(fetchResponse.status).json(parsed);
       } catch {
+        // Se o texto contiver linhas SSE (data: ...), responde com text/event-stream
+        if (text.includes('data:')) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          return res.status(fetchResponse.status).send(text);
+        }
         return res.status(fetchResponse.status).json({ text });
       }
     }
