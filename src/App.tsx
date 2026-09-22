@@ -104,6 +104,20 @@ async function safeReadJsonResponse(res: Response): Promise<any> {
     const trimmed = text.trim();
     const snippet = trimmed.slice(0, 300);
 
+    // Detecção específica de erro 404 de infraestrutura (ex: Vercel Edge gru1 / CDN estática)
+    if (
+      trimmed.includes('NOT_FOUND') ||
+      trimmed.includes('gru1::') ||
+      trimmed.includes('The page could not be found')
+    ) {
+      throw new Error(
+        `O servidor backend (/api/proxy) não está ativo nesta hospedagem (HTTP 404 da Vercel Edge / GRU1).\n\n` +
+        `Esta instalação está rodando apenas o frontend estático. Como resolver:\n` +
+        `1. Nas configurações do Colab (Avançado), desmarque "Usar proxy do servidor" para conectar diretamente ao ngrok pelo navegador;\n` +
+        `2. Ou execute a aplicação com "npm run dev" no seu computador para rodar o backend Node.js completo.`
+      );
+    }
+
     if (
       contentType.includes('text/html') ||
       trimmed.startsWith('<') ||
@@ -883,22 +897,40 @@ export default function App() {
       // Check what models the Colab instance actually has
       let detectedModel = '';
       try {
-        const pingRes = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: `${baseUrl}/v1/models`,
-            method: 'GET',
-            headers,
-          }),
-        });
-        const pingData = await safeReadJsonResponse(pingRes);
-        if (pingData.data && Array.isArray(pingData.data) && pingData.data.length > 0) {
-          detectedModel = pingData.data[0].id || pingData.data[0].name || '';
-        } else if (Array.isArray(pingData) && pingData.length > 0) {
-          detectedModel = pingData[0].id || pingData[0].name || '';
-        } else if (pingData.models && Array.isArray(pingData.models) && pingData.models.length > 0) {
-          detectedModel = pingData.models[0].name || pingData.models[0].id || '';
+        let pingRes: Response | null = null;
+        if (cfg.useProxy) {
+          try {
+            pingRes = await fetch('/api/proxy', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                url: `${baseUrl}/v1/models`,
+                method: 'GET',
+                headers,
+              }),
+            });
+          } catch {}
+        }
+
+        // Se o proxy não respondeu ou retornou 404 (ex: Vercel sem backend Node)
+        if (!pingRes || !pingRes.ok) {
+          try {
+            pingRes = await fetch(`${baseUrl}/v1/models`, {
+              method: 'GET',
+              headers,
+            });
+          } catch {}
+        }
+
+        if (pingRes && pingRes.ok) {
+          const pingData = await safeReadJsonResponse(pingRes);
+          if (pingData.data && Array.isArray(pingData.data) && pingData.data.length > 0) {
+            detectedModel = pingData.data[0].id || pingData.data[0].name || '';
+          } else if (Array.isArray(pingData) && pingData.length > 0) {
+            detectedModel = pingData[0].id || pingData[0].name || '';
+          } else if (pingData.models && Array.isArray(pingData.models) && pingData.models.length > 0) {
+            detectedModel = pingData.models[0].name || pingData.models[0].id || '';
+          }
         }
       } catch {}
 
@@ -926,16 +958,46 @@ export default function App() {
       };
 
       let res: Response;
+      let usedDirectFallback = false;
+
       if (cfg.useProxy) {
-        res = await fetch('/api/proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: testUrl,
+        let proxyOk = false;
+        try {
+          res = await fetch('/api/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: testUrl,
+              headers,
+              body: testPayload,
+            }),
+          });
+          // Se retornou 404 de infraestrutura (Vercel Edge gru1 / sem backend)
+          if (res.status === 404) {
+            const peek = await res.clone().text();
+            if (peek.includes('NOT_FOUND') || peek.includes('gru1::') || peek.includes('The page could not be found')) {
+              console.warn('[Colab] /api/proxy inexistente nesta hospedagem estática. Tentando conexão direta...');
+              res = await fetch(testUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(testPayload),
+              });
+              usedDirectFallback = true;
+            } else {
+              proxyOk = true;
+            }
+          } else {
+            proxyOk = true;
+          }
+        } catch (proxyErr) {
+          // Erro de rede no proxy -> tenta direto
+          res = await fetch(testUrl, {
+            method: 'POST',
             headers,
-            body: testPayload,
-          }),
-        });
+            body: JSON.stringify(testPayload),
+          });
+          usedDirectFallback = true;
+        }
       } else {
         res = await fetch(testUrl, {
           method: 'POST',
@@ -1307,16 +1369,37 @@ ${effectiveInstruction}`
 
           let res: Response;
           if (config.useProxy) {
-            res = await fetch('/api/proxy', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                url: targetUrl,
+            try {
+              res = await fetch('/api/proxy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  url: targetUrl,
+                  headers,
+                  body: promptBody,
+                }),
+                signal: abortController.signal,
+              });
+              if (res.status === 404) {
+                const peek = await res.clone().text();
+                if (peek.includes('NOT_FOUND') || peek.includes('gru1::') || peek.includes('The page could not be found')) {
+                  console.warn('[Colab Plan] /api/proxy não disponível nesta hospedagem estática. Conectando diretamente ao ngrok...');
+                  res = await fetch(targetUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(promptBody),
+                    signal: abortController.signal,
+                  });
+                }
+              }
+            } catch (proxyErr) {
+              res = await fetch(targetUrl, {
+                method: 'POST',
                 headers,
-                body: promptBody,
-              }),
-              signal: abortController.signal,
-            });
+                body: JSON.stringify(promptBody),
+                signal: abortController.signal,
+              });
+            }
           } else {
             res = await fetch(targetUrl, {
               method: 'POST',
@@ -1553,16 +1636,37 @@ ${effectiveInstruction}`;
 
           let res: Response;
           if (config.useProxy) {
-            res = await fetch('/api/proxy', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                url: targetUrl,
+            try {
+              res = await fetch('/api/proxy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  url: targetUrl,
+                  headers,
+                  body,
+                }),
+                signal: abortController.signal,
+              });
+              if (res.status === 404) {
+                const peek = await res.clone().text();
+                if (peek.includes('NOT_FOUND') || peek.includes('gru1::') || peek.includes('The page could not be found')) {
+                  console.warn('[Colab Exec] /api/proxy não disponível nesta hospedagem estática. Conectando diretamente ao ngrok...');
+                  res = await fetch(targetUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(body),
+                    signal: abortController.signal,
+                  });
+                }
+              }
+            } catch (proxyErr) {
+              res = await fetch(targetUrl, {
+                method: 'POST',
                 headers,
-                body,
-              }),
-              signal: abortController.signal,
-            });
+                body: JSON.stringify(body),
+                signal: abortController.signal,
+              });
+            }
           } else {
             res = await fetch(targetUrl, {
               method: 'POST',
@@ -1660,17 +1764,31 @@ ${effectiveInstruction}`;
       setMessages((prev) => prev.filter((m) => !m.streaming));
 
       const errMsg = err.message || '';
+      const isBackendMissing =
+        errMsg.includes('NOT_FOUND') ||
+        errMsg.includes('The page could not be found') ||
+        errMsg.includes('gru1::') ||
+        errMsg.includes('Rota de backend') ||
+        errMsg.includes('não está ativo nesta hospedagem') ||
+        (errMsg.includes('404') && (errMsg.includes('/api/') || errMsg.includes('proxy')));
+
       const isModelNotFound =
-        errMsg.includes('MODEL_NOT_FOUND') ||
+        !isBackendMissing &&
+        (errMsg.includes('MODEL_NOT_FOUND') ||
         errMsg.toLowerCase().includes('model not found') ||
         errMsg.toLowerCase().includes('model_not_found') ||
         errMsg.toLowerCase().includes('does not exist') ||
-        errMsg.includes('404');
+        (errMsg.includes('404') && !errMsg.includes('HTTP 404')));
 
       let userFacingError = errMsg || 'Falha na comunicação. Verifique se o servidor está ativo e com as credenciais corretas.';
 
       if (isAbort) {
         userFacingError = 'Operação cancelada pelo usuário.';
+      } else if (isBackendMissing) {
+        userFacingError =
+          '⚠️ O servidor backend Node.js (/api/*) não está rodando nesta hospedagem (Erro 404 Vercel / Edge).\n\n' +
+          '• Para conectar ao Google Colab / ngrok: abra as Configurações (aba "Google Colab / ngrok" > "Avançado") e desmarque a opção "Usar proxy do servidor" para que seu navegador faça a requisição direta ao ngrok.\n' +
+          '• Para utilizar todas as rotas de backend (incluindo Gemini e proxy): execute o projeto localmente com "npm run dev" (na porta 3000) ou faça deploy em uma plataforma Node.js (Render, Railway, Fly.io).';
       } else if (isModelNotFound) {
         const detected = Array.isArray(config.detectedModels) && config.detectedModels.length > 0
           ? config.detectedModels

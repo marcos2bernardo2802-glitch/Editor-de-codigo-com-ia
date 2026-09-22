@@ -419,6 +419,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       let found: string[] = [];
 
+      // 1. Tenta via proxy do servidor
       try {
         const res = await fetch('/api/proxy', {
           method: 'POST',
@@ -441,6 +442,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       } catch {}
 
+      // Fallback direto ao /v1/models se proxy indisponível (ex: Vercel sem backend)
+      if (found.length === 0) {
+        try {
+          const resDirect = await fetch(`${baseUrl}/v1/models`, {
+            method: 'GET',
+            headers,
+          });
+          if (resDirect.ok) {
+            const data = await resDirect.json();
+            if (data.data && Array.isArray(data.data)) {
+              found = data.data.map((m: any) => m.id || m.name).filter(Boolean);
+            } else if (Array.isArray(data)) {
+              found = data.map((m: any) => m.id || m.name || m).filter(Boolean);
+            } else if (data.models && Array.isArray(data.models)) {
+              found = data.models.map((m: any) => m.name || m.id).filter(Boolean);
+            }
+          }
+        } catch {}
+      }
+
       if (found.length === 0) {
         try {
           const resTags = await fetch('/api/proxy', {
@@ -454,6 +475,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           });
           if (resTags.ok) {
             const dataTags = await resTags.json();
+            if (dataTags.models && Array.isArray(dataTags.models)) {
+              found = dataTags.models.map((m: any) => m.name || m.model).filter(Boolean);
+            }
+          }
+        } catch {}
+      }
+
+      // Fallback direto ao /api/tags
+      if (found.length === 0) {
+        try {
+          const resTagsDirect = await fetch(`${baseUrl}/api/tags`, {
+            method: 'GET',
+            headers,
+          });
+          if (resTagsDirect.ok) {
+            const dataTags = await resTagsDirect.json();
             if (dataTags.models && Array.isArray(dataTags.models)) {
               found = dataTags.models.map((m: any) => m.name || m.model).filter(Boolean);
             }
