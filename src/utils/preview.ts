@@ -1,4 +1,5 @@
 import { SupportedLanguage, ProjectFile } from '../types';
+import { normalizeFilePath, extractFileNameFromPath } from './workspace';
 
 export const CONSOLE_INJECT_SCRIPT = `<script id="preview-console-bridge">
 (function() {
@@ -30,37 +31,156 @@ export const CONSOLE_INJECT_SCRIPT = `<script id="preview-console-bridge">
 })();
 </script>`;
 
+/**
+ * Resolves a relative path against a base file directory.
+ * e.g. baseDir="src", rel="styles/main.css" -> "src/styles/main.css"
+ * e.g. baseDir="src/pages", rel="../styles/main.css" -> "src/styles/main.css"
+ */
+export function resolveRelativePath(baseDir: string, relativePath: string): string {
+  const clean = relativePath.split('?')[0].split('#')[0].trim();
+  if (clean.startsWith('/')) {
+    return normalizeFilePath(clean.slice(1));
+  }
+  const parts = baseDir ? baseDir.split('/').filter(Boolean) : [];
+  for (const seg of clean.split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') {
+      parts.pop();
+    } else {
+      parts.push(seg);
+    }
+  }
+  return parts.join('/');
+}
+
+/**
+ * Finds a project file by resolved path, partial ending, or file name.
+ */
+function findMatchingFile(
+  projectFiles: ProjectFile[],
+  targetPath: string
+): ProjectFile | undefined {
+  const normTarget = normalizeFilePath(targetPath).toLowerCase();
+  const targetFileName = extractFileNameFromPath(normTarget).toLowerCase();
+
+  // 1. Exact path match
+  let found = projectFiles.find(
+    (f) => normalizeFilePath(f.path || f.name).toLowerCase() === normTarget
+  );
+  if (found) return found;
+
+  // 2. Ends with target path (e.g. "style.css" matching "src/style.css")
+  found = projectFiles.find((f) =>
+    normalizeFilePath(f.path || f.name).toLowerCase().endsWith(normTarget)
+  );
+  if (found) return found;
+
+  // 3. Fallback: match by filename
+  found = projectFiles.find(
+    (f) => extractFileNameFromPath(f.path || f.name).toLowerCase() === targetFileName
+  );
+  return found;
+}
+
+function isExternalUrl(url: string): boolean {
+  return /^(?:[a-z]+:)?\/\//i.test(url) || url.startsWith('data:') || url.startsWith('blob:');
+}
+
+/**
+ * Generates the preview HTML for the iframe.
+ */
 export function generatePreviewHtml(
   code: string,
   language: SupportedLanguage,
   projectFiles?: ProjectFile[]
 ): string {
-  // If multi-file project is active, create an integrated HTML preview bundling CSS and JS
-  if (projectFiles && projectFiles.length > 1) {
-    const htmlFile =
+  // If multi-file project is active
+  if (projectFiles && projectFiles.length > 0) {
+    // 1. Find main HTML file (index.html, or first .html file, or active file if html)
+    const mainHtmlFile =
+      projectFiles.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
+      projectFiles.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
       projectFiles.find((f) => f.language === 'html' || f.name.endsWith('.html')) ||
-      (language === 'html' ? { content: code, name: 'index.html', language: 'html' as SupportedLanguage } : null);
+      (language === 'html' ? { content: code, name: 'index.html', path: 'index.html', language: 'html' as SupportedLanguage, id: 'temp' } : null);
 
-    const cssFiles = projectFiles.filter((f) => f.language === 'css' || f.name.endsWith('.css'));
-    const jsFiles = projectFiles.filter(
-      (f) =>
-        (f.language === 'javascript' || f.language === 'typescript' || f.name.endsWith('.js') || f.name.endsWith('.ts'))
-    );
+    if (mainHtmlFile) {
+      let combinedHtml = mainHtmlFile.content;
+      const htmlPath = normalizeFilePath(mainHtmlFile.path || mainHtmlFile.name);
+      const htmlDir = htmlPath.includes('/') ? htmlPath.slice(0, htmlPath.lastIndexOf('/')) : '';
 
-    if (htmlFile) {
-      let combinedHtml = htmlFile.content;
+      const embeddedFileIds = new Set<string>();
+      if (mainHtmlFile.id) {
+        embeddedFileIds.add(mainHtmlFile.id);
+      }
 
-      // Extract all styles
-      const bundledCss = cssFiles
-        .map((f) => `/* File: ${f.name} */\n${f.content}`)
+      // 2. Intercept <link rel="stylesheet" href="..."> tags
+      combinedHtml = combinedHtml.replace(/<link\b([^>]*?)>/gi, (match, attrs) => {
+        const isStylesheet = /\brel=["']?stylesheet["']?/i.test(attrs);
+        if (!isStylesheet) return match;
+
+        const hrefMatch = attrs.match(/\bhref=["']([^"']+)["']/i);
+        if (!hrefMatch) return match;
+
+        const href = hrefMatch[1];
+        if (isExternalUrl(href)) {
+          return match; // Keep external stylesheets (CDN, fonts) intact
+        }
+
+        const resolvedPath = resolveRelativePath(htmlDir, href);
+        const matchedFile = findMatchingFile(projectFiles, resolvedPath);
+
+        if (matchedFile) {
+          embeddedFileIds.add(matchedFile.id);
+          return `<style data-source="${matchedFile.path || matchedFile.name}">\n/* Injetado de: ${matchedFile.path || matchedFile.name} */\n${matchedFile.content}\n</style>`;
+        }
+
+        return match;
+      });
+
+      // 3. Intercept <script ... src="..."> tags
+      combinedHtml = combinedHtml.replace(
+        /<script\b([^>]*?)(?:\/>|>(.*?)<\/script>)/gis,
+        (match, attrs, innerContent) => {
+          const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+          if (!srcMatch) {
+            // Inline script, keep as is
+            return match;
+          }
+
+          const src = srcMatch[1];
+          if (isExternalUrl(src)) {
+            return match; // Keep external scripts intact
+          }
+
+          const resolvedPath = resolveRelativePath(htmlDir, src);
+          const matchedFile = findMatchingFile(projectFiles, resolvedPath);
+
+          if (matchedFile) {
+            embeddedFileIds.add(matchedFile.id);
+            return `<script data-source="${matchedFile.path || matchedFile.name}">\n// Injetado de: ${matchedFile.path || matchedFile.name}\ntry {\n${matchedFile.content}\n} catch(err) {\n  console.error('[Script Error ${matchedFile.path || matchedFile.name}]:', err);\n}\n<\/script>`;
+          }
+
+          return match;
+        }
+      );
+
+      // 4. Also bundle any remaining CSS files that weren't explicitly linked in the HTML
+      const remainingCss = projectFiles
+        .filter((f) => (f.language === 'css' || f.name.endsWith('.css')) && !embeddedFileIds.has(f.id))
+        .map((f) => `/* File: ${f.path || f.name} */\n${f.content}`)
         .join('\n\n');
 
-      // Extract all scripts
-      const bundledJs = jsFiles
-        .map((f) => `// File: ${f.name}\n${f.content}`)
+      // 5. Also bundle any remaining JS files that weren't explicitly linked
+      const remainingJs = projectFiles
+        .filter(
+          (f) =>
+            (f.language === 'javascript' || f.language === 'typescript' || f.name.endsWith('.js') || f.name.endsWith('.ts')) &&
+            !embeddedFileIds.has(f.id)
+        )
+        .map((f) => `// File: ${f.path || f.name}\ntry {\n${f.content}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}`)
         .join('\n\n');
 
-      // If document is missing basic structure
+      // Wrap if not a full HTML document
       if (!combinedHtml.includes('<html') && !combinedHtml.includes('<!DOCTYPE')) {
         combinedHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -68,64 +188,42 @@ export function generatePreviewHtml(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Projeto Preview</title>
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; margin: 0; }
-    ${bundledCss}
-  </style>
+  ${remainingCss ? `<style id="project-unlinked-styles">\n${remainingCss}\n</style>` : ''}
 </head>
 <body>
   ${combinedHtml}
-  <script>
-    try {
-      ${bundledJs}
-    } catch(err) {
-      console.error(err);
-    }
-  <\/script>
+  ${CONSOLE_INJECT_SCRIPT}
+  ${remainingJs ? `<script id="project-unlinked-scripts">\n${remainingJs}\n<\/script>` : ''}
 </body>
 </html>`;
         return combinedHtml;
       }
 
-      // Inject bundled styles into head
-      if (bundledCss) {
+      // Inject unlinked CSS into head
+      if (remainingCss) {
         if (combinedHtml.includes('</head>')) {
           combinedHtml = combinedHtml.replace(
             '</head>',
-            `<style id="project-bundled-styles">\n${bundledCss}\n</style>\n</head>`
+            `<style id="project-unlinked-styles">\n${remainingCss}\n</style>\n</head>`
           );
         } else {
-          combinedHtml = `<style id="project-bundled-styles">\n${bundledCss}\n</style>\n` + combinedHtml;
+          combinedHtml = `<style id="project-unlinked-styles">\n${remainingCss}\n</style>\n` + combinedHtml;
         }
       }
 
-      // Inject bundled scripts before body close
-      if (bundledJs) {
-        const scriptTag = `<script id="project-bundled-scripts">
-try {
-${bundledJs}
-} catch(err) {
-  console.error('[Projeto JS Error]:', err);
-}
-<\/script>`;
-        if (combinedHtml.includes('</body>')) {
-          combinedHtml = combinedHtml.replace('</body>', `${CONSOLE_INJECT_SCRIPT}\n${scriptTag}\n</body>`);
-        } else {
-          combinedHtml = combinedHtml + `\n${CONSOLE_INJECT_SCRIPT}\n${scriptTag}`;
-        }
+      // Inject console bridge & unlinked JS before body close
+      const scriptInjection = `${CONSOLE_INJECT_SCRIPT}\n${remainingJs ? `<script id="project-unlinked-scripts">\n${remainingJs}\n<\/script>` : ''}`;
+      if (combinedHtml.includes('</body>')) {
+        combinedHtml = combinedHtml.replace('</body>', `${scriptInjection}\n</body>`);
       } else {
-        if (combinedHtml.includes('</body>')) {
-          combinedHtml = combinedHtml.replace('</body>', `${CONSOLE_INJECT_SCRIPT}\n</body>`);
-        } else {
-          combinedHtml = combinedHtml + `\n${CONSOLE_INJECT_SCRIPT}`;
-        }
+        combinedHtml = combinedHtml + `\n${scriptInjection}`;
       }
 
       return combinedHtml;
     }
   }
 
-  // Single file or fallback rendering
+  // Fallback for single file rendering
   if (language === 'html') {
     let finalHtml = code;
     if (!code.includes('<html') && !code.includes('<!DOCTYPE')) {
@@ -236,6 +334,41 @@ ${bundledJs}
       console.error(err.message);
     }
   <\/script>
+</body>
+</html>`;
+  }
+
+  if (language === 'markdown') {
+    // Basic Markdown formatting preview
+    const escaped = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1.6;
+      color: #334155;
+      background: #ffffff;
+      padding: 32px 24px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 { color: #0f172a; margin-top: 1.5em; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+    code { font-family: monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+    pre { background: #0f172a; color: #f8fafc; padding: 16px; border-radius: 8px; overflow-x: auto; }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    blockquote { border-left: 4px solid #3b82f6; margin-left: 0; padding-left: 16px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <pre style="white-space: pre-wrap; font-family: inherit; background: transparent; color: inherit; padding: 0;">${escaped}</pre>
 </body>
 </html>`;
   }

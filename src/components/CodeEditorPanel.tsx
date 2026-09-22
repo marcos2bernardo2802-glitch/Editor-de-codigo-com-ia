@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { LivePreviewPane } from './LivePreviewPane';
 import { FileTabBar } from './FileTabBar';
+import { FileTreeExplorer } from './FileTreeExplorer';
 import { DiagnosticsBar } from './DiagnosticsBar';
 import { diagnoseCode } from '../utils/diagnostics';
 
@@ -62,9 +63,9 @@ interface CodeEditorPanelProps {
   files: ProjectFile[];
   activeFileId: string;
   onSelectFile: (fileId: string) => void;
-  onAddFile: (name: string, language: SupportedLanguage, initialContent?: string) => void;
+  onAddFile: (pathOrName: string, language: SupportedLanguage, initialContent?: string) => void;
   onDeleteFile: (fileId: string) => void;
-  onRenameFile: (fileId: string, newName: string) => void;
+  onRenameFile: (fileId: string, newPathOrName: string) => void;
 
   // Diagnostics & Auto-Fix
   onAutoFixDiagnostic?: (diagnostic: DiagnosticItem | DiagnosticItem[]) => void;
@@ -108,6 +109,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
 }) => {
   // Toggle diagnostics bar visibility
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(true);
+  // Toggle file tree explorer visibility
+  const [isExplorerOpen, setIsExplorerOpen] = useState<boolean>(true);
 
   // Run real-time syntax diagnostics
   const diagnostics = useMemo(() => {
@@ -167,6 +170,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         break;
       case 'json':
         list.push(javascript());
+        break;
+      case 'markdown':
+        list.push(html());
         break;
       default:
         list.push(html());
@@ -395,117 +401,139 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
         </div>
       </div>
 
-      {/* Multi-file Workspace Tab Bar (only active in 'project' mode) */}
-      {workspaceMode === 'project' && (
-        <FileTabBar
-          files={files}
-          activeFileId={activeFileId}
-          onSelectFile={onSelectFile}
-          onAddFile={onAddFile}
-          onDeleteFile={onDeleteFile}
-          onRenameFile={onRenameFile}
-        />
-      )}
+      {/* Workspace Area: Explorer (left) + TabBar & Editor/Preview (right) */}
+      <div className="flex-1 flex min-h-0 relative overflow-hidden">
+        {/* File Tree Explorer (only in 'project' mode) */}
+        {workspaceMode === 'project' && (
+          <FileTreeExplorer
+            files={files}
+            activeFileId={activeFileId}
+            onSelectFile={onSelectFile}
+            onAddFile={onAddFile}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            isOpen={isExplorerOpen}
+            onToggleOpen={() => setIsExplorerOpen(!isExplorerOpen)}
+          />
+        )}
 
-      {/* Editor & Preview Split Container */}
-      <div className="flex-1 flex flex-col md:flex-row min-h-0 relative">
-        {/* Code Editor (rendered in 'code' or 'split' modes) */}
-        {(viewMode === 'code' || viewMode === 'split') && (
-          <div
-            className={`h-full flex flex-col min-h-0 ${
-              viewMode === 'split' ? 'w-full md:w-1/2 border-b md:border-b-0 md:border-r border-[var(--border)]' : 'w-full'
-            }`}
-            style={{ fontSize: `${fontSize}px` }}
-          >
-            {/* Selection notification banner when in selection mode */}
-            {aiScopeMode === 'selection' && (
-              <div className="px-3 py-1.5 bg-[var(--accent)]/10 border-b border-[var(--accent)]/30 flex items-center justify-between text-xs text-[var(--text)] shrink-0 select-none">
-                <div className="flex items-center gap-1.5 font-sans">
-                  <Scissors className="w-3.5 h-3.5 text-[var(--accent)]" />
-                  {selection ? (
-                    <span>
-                      Trecho ativo: <strong className="font-mono text-[var(--accent)]">Linhas {selection.fromLine}–{selection.toLine}</strong> ({selection.text.length} caracteres)
-                    </span>
-                  ) : (
-                    <span className="text-[var(--muted)]">
-                      Selecione com o mouse o bloco de código que deseja editar com a IA.
-                    </span>
-                  )}
+        {/* Central Workspace: Tab Bar and Editor/Preview Split */}
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+          {/* Multi-file Workspace Tab Bar (only active in 'project' mode) */}
+          {workspaceMode === 'project' && (
+            <FileTabBar
+              files={files}
+              activeFileId={activeFileId}
+              onSelectFile={onSelectFile}
+              onAddFile={onAddFile}
+              onDeleteFile={onDeleteFile}
+              onRenameFile={onRenameFile}
+              isExplorerOpen={isExplorerOpen}
+              onToggleExplorer={() => setIsExplorerOpen(!isExplorerOpen)}
+            />
+          )}
+
+          {/* Editor & Preview Split Container */}
+          <div className="flex-1 flex flex-col md:flex-row min-h-0 relative">
+            {/* Code Editor (rendered in 'code' or 'split' modes) */}
+            {(viewMode === 'code' || viewMode === 'split') && (
+              <div
+                className={`h-full flex flex-col min-h-0 ${
+                  viewMode === 'split' ? 'w-full md:w-1/2 border-b md:border-b-0 md:border-r border-[var(--border)]' : 'w-full'
+                }`}
+                style={{ fontSize: `${fontSize}px` }}
+              >
+                {/* Selection notification banner when in selection mode */}
+                {aiScopeMode === 'selection' && (
+                  <div className="px-3 py-1.5 bg-[var(--accent)]/10 border-b border-[var(--accent)]/30 flex items-center justify-between text-xs text-[var(--text)] shrink-0 select-none">
+                    <div className="flex items-center gap-1.5 font-sans">
+                      <Scissors className="w-3.5 h-3.5 text-[var(--accent)]" />
+                      {selection ? (
+                        <span>
+                          Trecho ativo: <strong className="font-mono text-[var(--accent)]">Linhas {selection.fromLine}–{selection.toLine}</strong> ({selection.text.length} caracteres)
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted)]">
+                          Selecione com o mouse o bloco de código que deseja editar com a IA.
+                        </span>
+                      )}
+                    </div>
+                    {selection && (
+                      <button
+                        onClick={() => onSelectionChange(null)}
+                        className="text-[10px] text-[var(--muted)] hover:text-[var(--text)] font-sans underline cursor-pointer"
+                      >
+                        Desmarcar
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <CodeMirror
+                    value={code}
+                    height="100%"
+                    theme={theme === 'dark' ? oneDark : githubLight}
+                    extensions={extensions}
+                    basicSetup={{
+                      lineNumbers: true,
+                      highlightActiveLineGutter: true,
+                      highlightSpecialChars: true,
+                      history: true,
+                      foldGutter: true,
+                      drawSelection: true,
+                      dropCursor: true,
+                      allowMultipleSelections: true,
+                      indentOnInput: true,
+                      syntaxHighlighting: true,
+                      bracketMatching: true,
+                      closeBrackets: true,
+                      autocompletion: true,
+                      rectangularSelection: true,
+                      crosshairCursor: true,
+                      highlightActiveLine: true,
+                      highlightSelectionMatches: true,
+                      closeBracketsKeymap: true,
+                      defaultKeymap: true,
+                      searchKeymap: true,
+                      historyKeymap: true,
+                      foldKeymap: true,
+                      completionKeymap: true,
+                      lintKeymap: true,
+                    }}
+                    onChange={(val) => onChangeCode(val)}
+                    placeholder="// Cole ou digite seu código aqui..."
+                    className="h-full w-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto [&_.cm-gutters]:bg-[var(--panel)] [&_.cm-gutters]:border-r [&_.cm-gutters]:border-[var(--border)]"
+                  />
                 </div>
-                {selection && (
-                  <button
-                    onClick={() => onSelectionChange(null)}
-                    className="text-[10px] text-[var(--muted)] hover:text-[var(--text)] font-sans underline cursor-pointer"
-                  >
-                    Desmarcar
-                  </button>
+
+                {/* Sugestão 4: Diagnostics Bar & One-Click Auto-Fix */}
+                {showDiagnostics && diagnostics.length > 0 && onAutoFixDiagnostic && (
+                  <DiagnosticsBar
+                    diagnostics={diagnostics}
+                    onAutoFix={onAutoFixDiagnostic}
+                    isLoading={isLoading}
+                  />
                 )}
               </div>
             )}
 
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <CodeMirror
-                value={code}
-                height="100%"
-                theme={theme === 'dark' ? oneDark : githubLight}
-                extensions={extensions}
-                basicSetup={{
-                  lineNumbers: true,
-                  highlightActiveLineGutter: true,
-                  highlightSpecialChars: true,
-                  history: true,
-                  foldGutter: true,
-                  drawSelection: true,
-                  dropCursor: true,
-                  allowMultipleSelections: true,
-                  indentOnInput: true,
-                  syntaxHighlighting: true,
-                  bracketMatching: true,
-                  closeBrackets: true,
-                  autocompletion: true,
-                  rectangularSelection: true,
-                  crosshairCursor: true,
-                  highlightActiveLine: true,
-                  highlightSelectionMatches: true,
-                  closeBracketsKeymap: true,
-                  defaultKeymap: true,
-                  searchKeymap: true,
-                  historyKeymap: true,
-                  foldKeymap: true,
-                  completionKeymap: true,
-                  lintKeymap: true,
-                }}
-                onChange={(val) => onChangeCode(val)}
-                placeholder="// Cole ou digite seu código aqui..."
-                className="h-full w-full [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto [&_.cm-gutters]:bg-[var(--panel)] [&_.cm-gutters]:border-r [&_.cm-gutters]:border-[var(--border)]"
-              />
-            </div>
-
-            {/* Sugestão 4: Diagnostics Bar & One-Click Auto-Fix */}
-            {showDiagnostics && diagnostics.length > 0 && onAutoFixDiagnostic && (
-              <DiagnosticsBar
-                diagnostics={diagnostics}
-                onAutoFix={onAutoFixDiagnostic}
-                isLoading={isLoading}
-              />
+            {/* Live Preview Pane (rendered in 'preview' or 'split' modes) */}
+            {(viewMode === 'preview' || viewMode === 'split') && (
+              <div
+                className={`h-full overflow-hidden ${
+                  viewMode === 'split' ? 'w-full md:w-1/2' : 'w-full'
+                }`}
+              >
+                <LivePreviewPane
+                  code={code}
+                  language={language}
+                  projectFiles={workspaceMode === 'project' ? files : undefined}
+                />
+              </div>
             )}
           </div>
-        )}
-
-        {/* Live Preview Pane (rendered in 'preview' or 'split' modes) */}
-        {(viewMode === 'preview' || viewMode === 'split') && (
-          <div
-            className={`h-full overflow-hidden ${
-              viewMode === 'split' ? 'w-full md:w-1/2' : 'w-full'
-            }`}
-          >
-            <LivePreviewPane
-              code={code}
-              language={language}
-              projectFiles={workspaceMode === 'project' ? files : undefined}
-            />
-          </div>
-        )}
+        </div>
       </div>
     </section>
   );

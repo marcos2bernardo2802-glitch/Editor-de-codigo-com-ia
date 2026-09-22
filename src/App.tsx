@@ -17,11 +17,18 @@ import {
   ChatImageAttachment,
 } from './types';
 import { CODE_TEMPLATES } from './utils/templates';
-import { DEFAULT_PROJECT_FILES, detectLanguageFromName } from './utils/workspace';
+import {
+  DEFAULT_PROJECT_FILES,
+  detectLanguageFromName,
+  normalizeFilePath,
+  extractFileNameFromPath,
+} from './utils/workspace';
 import { fillTemplate, getByPath } from './utils/templateEngine';
 import { readAiStream, cleanCodeOutput } from './utils/streamReader';
 import { formatCode } from './utils/formatter';
 import { exportProjectAsZip } from './utils/exportZip';
+import { importProjectFromZip } from './utils/importZip';
+import { processDroppedData } from './utils/dropHandler';
 import { processImageFiles } from './utils/imageResize';
 import { getShortModelName } from './utils/modelNames';
 import { Header } from './components/Header';
@@ -30,6 +37,8 @@ import { SidePanel } from './components/SidePanel';
 import { SettingsModal } from './components/SettingsModal';
 import { TemplatesModal } from './components/TemplatesModal';
 import { VersionHistoryModal } from './components/VersionHistoryModal';
+import { ImportConflictModal } from './components/ImportConflictModal';
+import { DropzoneOverlay } from './components/DropzoneOverlay';
 
 const DEFAULT_CONFIG: ConnectionConfig = {
   provider: 'gemini',
@@ -126,6 +135,12 @@ export default function App() {
   const [files, setFiles] = useState<ProjectFile[]>(DEFAULT_PROJECT_FILES);
   const [activeFileId, setActiveFileId] = useState<string>('file-index-html');
   const activeFile = files.find((f) => f.id === activeFileId);
+
+  // Drag and Drop & Import state (Etapas 2 e 3)
+  const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
+  const [pendingImportFiles, setPendingImportFiles] = useState<ProjectFile[] | null>(null);
+  const [isImportConflictOpen, setIsImportConflictOpen] = useState<boolean>(false);
+  const dragCounterRef = useRef<number>(0);
 
   // Main editor state
   const [code, setCode] = useState<string>(CODE_TEMPLATES[0].code);
@@ -498,10 +513,13 @@ export default function App() {
   };
 
   // Add new file to project
-  const handleAddFile = (name: string, lang: SupportedLanguage, initialContent = '') => {
+  const handleAddFile = (pathOrName: string, lang: SupportedLanguage, initialContent = '') => {
+    const normPath = normalizeFilePath(pathOrName);
+    const fileName = extractFileNameFromPath(normPath);
     const newFile: ProjectFile = {
-      id: `file-${Date.now()}`,
-      name,
+      id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      path: normPath,
+      name: fileName,
       language: lang,
       content: initialContent,
       history: [initialContent],
@@ -533,12 +551,21 @@ export default function App() {
     }
   };
 
-  // Rename file in project
-  const handleRenameFile = (fileId: string, newName: string) => {
-    const detectedLang = detectLanguageFromName(newName);
+  // Rename file or path in project
+  const handleRenameFile = (fileId: string, newPathOrName: string) => {
+    const normPath = normalizeFilePath(newPathOrName);
+    const fileName = extractFileNameFromPath(normPath);
+    const detectedLang = detectLanguageFromName(fileName);
     setFiles((prev) =>
       prev.map((f) =>
-        f.id === fileId ? { ...f, name: newName, language: detectedLang } : f
+        f.id === fileId
+          ? {
+              ...f,
+              path: normPath,
+              name: fileName,
+              language: detectedLang,
+            }
+          : f
       )
     );
     if (activeFileId === fileId) {
@@ -1449,12 +1476,145 @@ ${userPromptText}`
     }
   };
 
-  // Sugestão Extra: Exportar projeto como ZIP
+  // Sugestão Extra: Exportar projeto como ZIP (Etapa 4)
   const handleExportZip = async () => {
     try {
       await exportProjectAsZip(files, workspaceMode, code, language);
     } catch (err: any) {
       console.error('Erro ao exportar ZIP:', err);
+    }
+  };
+
+  // Aplica os arquivos importados (substituindo ou mesclando)
+  const applyImportedFiles = useCallback(
+    (incoming: ProjectFile[], mode: 'replace' | 'merge') => {
+      if (mode === 'replace') {
+        setFiles(incoming);
+        setWorkspaceMode('project');
+        const first = incoming[0];
+        if (first) {
+          setActiveFileId(first.id);
+          setCode(first.content);
+          setLanguage(first.language);
+          setHistory([first.content]);
+          setHistoryIndex(0);
+          setSelection(null);
+        }
+      } else {
+        // Mesclagem com arquivos existentes: arquivos com o mesmo path devem ser sobrescritos
+        const incomingPathMap = new Map<string, ProjectFile>();
+        incoming.forEach((f) => {
+          incomingPathMap.set(normalizeFilePath(f.path || f.name).toLowerCase(), f);
+        });
+
+        const merged: ProjectFile[] = [];
+        files.forEach((existing) => {
+          const norm = normalizeFilePath(existing.path || existing.name).toLowerCase();
+          if (!incomingPathMap.has(norm)) {
+            merged.push(existing);
+          }
+        });
+        merged.push(...incoming);
+
+        setFiles(merged);
+        setWorkspaceMode('project');
+        const stillActive = merged.find((f) => f.id === activeFileId);
+        if (stillActive) {
+          setCode(stillActive.content);
+          setLanguage(stillActive.language);
+        } else {
+          const first = incoming[0] || merged[0];
+          if (first) {
+            setActiveFileId(first.id);
+            setCode(first.content);
+            setLanguage(first.language);
+            setHistory([first.content]);
+            setHistoryIndex(0);
+            setSelection(null);
+          }
+        }
+      }
+      setIsImportConflictOpen(false);
+      setPendingImportFiles(null);
+    },
+    [files, activeFileId]
+  );
+
+  // Processa arquivos recebidos por .zip ou drag & drop
+  const handleProcessIncomingFiles = useCallback(
+    (incoming: ProjectFile[]) => {
+      if (incoming.length === 0) return;
+      // Se o workspace estiver vazio ou com arquivo inicial sem edição
+      const isWorkspaceEmpty =
+        files.length === 0 ||
+        (files.length === 1 && (!files[0].content || files[0].content.trim() === ''));
+
+      if (isWorkspaceEmpty) {
+        applyImportedFiles(incoming, 'replace');
+      } else {
+        setPendingImportFiles(incoming);
+        setIsImportConflictOpen(true);
+      }
+    },
+    [files, applyImportedFiles]
+  );
+
+  // Importa projeto a partir de um arquivo .zip (Etapa 2)
+  const handleImportZip = useCallback(
+    async (file: File) => {
+      try {
+        const imported = await importProjectFromZip(file);
+        if (imported.length === 0) {
+          alert('Nenhum arquivo de código/texto suportado foi localizado no arquivo .zip.');
+          return;
+        }
+        handleProcessIncomingFiles(imported);
+      } catch (err: any) {
+        console.error('Erro ao importar ZIP:', err);
+        alert(`Erro ao processar o arquivo .zip: ${err?.message || 'Arquivo corrompido ou formato inválido'}`);
+      }
+    },
+    [handleProcessIncomingFiles]
+  );
+
+  // Handlers de Drag & Drop (Etapa 3)
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+
+    try {
+      const droppedFiles = await processDroppedData(e.dataTransfer);
+      if (droppedFiles.length > 0) {
+        handleProcessIncomingFiles(droppedFiles);
+      }
+    } catch (err: any) {
+      console.error('Erro ao soltar arquivos:', err);
     }
   };
 
@@ -1541,6 +1701,7 @@ ${userPromptText}`
       css: 'css',
       python: 'py',
       json: 'json',
+      markdown: 'md',
     };
     const extension = extMap[language] || 'txt';
     const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
@@ -1582,7 +1743,16 @@ ${userPromptText}`
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--text)]">
+    <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="relative flex flex-col h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--text)]"
+    >
+      {/* Drag & Drop Visual Overlay (Etapa 3) */}
+      <DropzoneOverlay isVisible={isDraggingOver} />
+
       {/* Header Bar */}
       <Header
         status={status}
@@ -1597,6 +1767,7 @@ ${userPromptText}`
         onCopy={handleCopyCode}
         onDownload={handleDownloadCode}
         onExportZip={handleExportZip}
+        onImportZip={handleImportZip}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenTemplates={() => setIsTemplatesOpen(true)}
       />
@@ -1708,6 +1879,21 @@ ${userPromptText}`
             : `arquivo.${language}`
         }
       />
+
+      {/* Import Conflict Resolution Modal (Etapas 2 e 3) */}
+      {isImportConflictOpen && pendingImportFiles && (
+        <ImportConflictModal
+          isOpen={isImportConflictOpen}
+          incomingFiles={pendingImportFiles}
+          existingFiles={files}
+          onReplace={() => applyImportedFiles(pendingImportFiles, 'replace')}
+          onMerge={() => applyImportedFiles(pendingImportFiles, 'merge')}
+          onCancel={() => {
+            setIsImportConflictOpen(false);
+            setPendingImportFiles(null);
+          }}
+        />
+      )}
     </div>
   );
 }

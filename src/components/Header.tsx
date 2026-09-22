@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Copy,
   Download,
@@ -13,6 +13,7 @@ import {
   Moon,
   FolderArchive,
   FolderDown,
+  FolderUp,
 } from 'lucide-react';
 import { ConnectionConfig, ThemeMode } from '../types';
 
@@ -29,6 +30,7 @@ interface HeaderProps {
   onCopy: () => void;
   onDownload: () => void;
   onExportZip?: () => void;
+  onImportZip?: (file: File) => void;
   onOpenSettings: () => void;
   onOpenTemplates: () => void;
 }
@@ -46,15 +48,25 @@ export const Header: React.FC<HeaderProps> = ({
   onCopy,
   onDownload,
   onExportZip,
+  onImportZip,
   onOpenSettings,
   onOpenTemplates,
 }) => {
   const [copied, setCopied] = useState(false);
+  const zipInputRef = useRef<HTMLInputElement>(null);
 
   const handleCopy = () => {
     onCopy();
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
+  };
+
+  const handleZipFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onImportZip) {
+      onImportZip(file);
+    }
+    e.target.value = '';
   };
 
   return (
@@ -137,6 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
           {copied ? <Check className="w-4 h-4 text-[var(--add)]" /> : <Copy className="w-4 h-4" />}
         </button>
 
+        {/* Download single active file */}
         <button
           id="btnDownload"
           onClick={onDownload}
@@ -145,6 +158,43 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Download className="w-4 h-4" />
         </button>
+
+        {/* Hidden Zip file input */}
+        <input
+          ref={zipInputRef}
+          type="file"
+          accept=".zip"
+          onChange={handleZipFileChange}
+          className="hidden"
+        />
+
+        {/* Import ZIP Button */}
+        {onImportZip && (
+          <button
+            id="btnImportZip"
+            type="button"
+            onClick={() => zipInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-lg bg-transparent transition-colors cursor-pointer"
+            title="Importar projeto (.zip)"
+          >
+            <FolderUp className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span className="hidden lg:inline">Importar .zip</span>
+          </button>
+        )}
+
+        {/* Export ZIP Button */}
+        {onExportZip && (
+          <button
+            id="btnExportZip"
+            type="button"
+            onClick={onExportZip}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-lg bg-transparent transition-colors cursor-pointer"
+            title="Exportar projeto completo em .zip"
+          >
+            <FolderDown className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span className="hidden lg:inline">Exportar .zip</span>
+          </button>
+        )}
 
         <div className="flex items-center border border-[var(--border)] rounded-lg overflow-hidden">
           <button

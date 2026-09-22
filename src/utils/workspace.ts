@@ -1,5 +1,20 @@
 import { ProjectFile, SupportedLanguage } from '../types';
 
+export function normalizeFilePath(inputPath: string): string {
+  let cleaned = inputPath.trim().replace(/\\/g, '/');
+  // Remove leading slashes and ./
+  cleaned = cleaned.replace(/^\.?\/+/, '');
+  // Remove duplicate slashes
+  cleaned = cleaned.replace(/\/+/g, '/');
+  return cleaned;
+}
+
+export function extractFileNameFromPath(fullPath: string): string {
+  const normalized = normalizeFilePath(fullPath);
+  const segments = normalized.split('/');
+  return segments[segments.length - 1] || normalized;
+}
+
 export function detectLanguageFromName(filename: string): SupportedLanguage {
   const ext = filename.split('.').pop()?.toLowerCase();
   switch (ext) {
@@ -19,6 +34,9 @@ export function detectLanguageFromName(filename: string): SupportedLanguage {
       return 'python';
     case 'json':
       return 'json';
+    case 'md':
+    case 'markdown':
+      return 'markdown';
     default:
       return 'html';
   }
@@ -38,6 +56,8 @@ export function getDefaultFileContent(name: string, language: SupportedLanguage)
       return `# Python script: ${name}\ndef main():\n    print("Olá do ${name}")\n\nif __name__ == "__main__":\n    main()\n`;
     case 'json':
       return `{\n  "name": "${name}",\n  "version": "1.0.0"\n}`;
+    case 'markdown':
+      return `# ${name}\n\nDocumentação e anotações do projeto.\n`;
     default:
       return '';
   }
@@ -46,6 +66,7 @@ export function getDefaultFileContent(name: string, language: SupportedLanguage)
 export const DEFAULT_PROJECT_FILES: ProjectFile[] = [
   {
     id: 'file-index-html',
+    path: 'index.html',
     name: 'index.html',
     language: 'html',
     content: `<!DOCTYPE html>
@@ -73,6 +94,7 @@ export const DEFAULT_PROJECT_FILES: ProjectFile[] = [
   },
   {
     id: 'file-style-css',
+    path: 'style.css',
     name: 'style.css',
     language: 'css',
     content: `body {
@@ -164,6 +186,7 @@ p {
   },
   {
     id: 'file-script-js',
+    path: 'script.js',
     name: 'script.js',
     language: 'javascript',
     content: `let count = 0;

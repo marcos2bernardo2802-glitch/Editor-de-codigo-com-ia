@@ -1,4 +1,4 @@
-export type SupportedLanguage = 'html' | 'javascript' | 'typescript' | 'css' | 'python' | 'json';
+export type SupportedLanguage = 'html' | 'javascript' | 'typescript' | 'css' | 'python' | 'json' | 'markdown';
 
 export type AIProvider = 'gemini' | 'colab';
 
@@ -22,6 +22,7 @@ export interface SelectionRange {
 
 export interface ProjectFile {
   id: string;
+  path: string;
   name: string;
   language: SupportedLanguage;
   content: string;

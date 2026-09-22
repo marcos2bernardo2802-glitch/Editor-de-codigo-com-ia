@@ -13,9 +13,10 @@ export async function exportProjectAsZip(
   const zip = new JSZip();
 
   if (workspaceMode === 'project' && files.length > 0) {
-    // Add all project files into zip root
+    // Add all project files into zip, preserving folder structure
     files.forEach((file) => {
-      zip.file(file.name, file.content);
+      const filePath = file.path || file.name;
+      zip.file(filePath, file.content);
     });
 
     // Add a basic README
@@ -32,6 +33,7 @@ export async function exportProjectAsZip(
       css: 'css',
       python: 'py',
       json: 'json',
+      markdown: 'md',
     };
     const ext = extMap[activeLanguage] || 'txt';
     const filename = `codigo.${ext}`;

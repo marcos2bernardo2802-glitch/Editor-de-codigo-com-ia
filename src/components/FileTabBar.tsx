@@ -1,15 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, X, FileCode, FileText, Check, Edit2 } from 'lucide-react';
+import { Plus, X, FileCode, FileText, Check, Edit2, PanelLeft } from 'lucide-react';
 import { ProjectFile, SupportedLanguage } from '../types';
-import { detectLanguageFromName, getDefaultFileContent } from '../utils/workspace';
+import {
+  detectLanguageFromName,
+  getDefaultFileContent,
+  normalizeFilePath,
+  extractFileNameFromPath,
+} from '../utils/workspace';
 
 interface FileTabBarProps {
   files: ProjectFile[];
   activeFileId: string;
   onSelectFile: (fileId: string) => void;
-  onAddFile: (name: string, language: SupportedLanguage, initialContent?: string) => void;
+  onAddFile: (pathOrName: string, language: SupportedLanguage, initialContent?: string) => void;
   onDeleteFile: (fileId: string) => void;
-  onRenameFile: (fileId: string, newName: string) => void;
+  onRenameFile: (fileId: string, newPathOrName: string) => void;
+  isExplorerOpen?: boolean;
+  onToggleExplorer?: () => void;
 }
 
 export const FileTabBar: React.FC<FileTabBarProps> = ({
@@ -19,6 +26,8 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
   onAddFile,
   onDeleteFile,
   onRenameFile,
+  isExplorerOpen = true,
+  onToggleExplorer,
 }) => {
   const [isAdding, setIsAdding] = useState<boolean>(false);
   const [newFileName, setNewFileName] = useState<string>('');
@@ -41,31 +50,33 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
   }, [editingFileId]);
 
   const handleConfirmAdd = () => {
-    const trimmed = newFileName.trim();
-    if (!trimmed) {
+    const raw = newFileName.trim();
+    if (!raw) {
       setIsAdding(false);
       return;
     }
 
+    let fullPath = normalizeFilePath(raw);
+
     // Ensure extension
-    let finalName = trimmed;
-    if (!finalName.includes('.')) {
-      finalName += '.js';
+    if (!extractFileNameFromPath(fullPath).includes('.')) {
+      fullPath += '.js';
     }
 
-    // Avoid duplicate names
+    // Avoid duplicate paths
     let counter = 1;
-    let uniqueName = finalName;
-    while (files.some((f) => f.name.toLowerCase() === uniqueName.toLowerCase())) {
-      const parts = finalName.split('.');
+    let uniquePath = fullPath;
+    while (files.some((f) => normalizeFilePath(f.path || f.name).toLowerCase() === uniquePath.toLowerCase())) {
+      const parts = fullPath.split('.');
       const ext = parts.pop();
-      uniqueName = `${parts.join('.')}_${counter}.${ext}`;
+      uniquePath = `${parts.join('.')}_${counter}.${ext}`;
       counter++;
     }
 
-    const lang = detectLanguageFromName(uniqueName);
-    const content = getDefaultFileContent(uniqueName, lang);
-    onAddFile(uniqueName, lang, content);
+    const fileName = extractFileNameFromPath(uniquePath);
+    const lang = detectLanguageFromName(fileName);
+    const content = getDefaultFileContent(fileName, lang);
+    onAddFile(uniquePath, lang, content);
     setNewFileName('');
     setIsAdding(false);
   };
@@ -93,6 +104,8 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
         return <span className="text-[10px] font-bold text-emerald-400">PY</span>;
       case 'json':
         return <span className="text-[10px] font-bold text-amber-400">JSON</span>;
+      case 'markdown':
+        return <span className="text-[10px] font-bold text-purple-400">MD</span>;
       default:
         return <FileCode className="w-3 h-3 text-[var(--muted)]" />;
     }
@@ -100,6 +113,22 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
 
   return (
     <div className="flex items-center gap-1 px-2 pt-1 bg-[var(--panel-2)] border-b border-[var(--border)] overflow-x-auto no-scrollbar shrink-0 select-none">
+      {/* Explorer Toggle Button */}
+      {onToggleExplorer && (
+        <button
+          type="button"
+          onClick={onToggleExplorer}
+          className={`p-1.5 rounded-md text-xs transition-colors cursor-pointer mr-1 shrink-0 ${
+            isExplorerOpen
+              ? 'bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30'
+              : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] border border-transparent'
+          }`}
+          title={isExplorerOpen ? 'Recolher painel de pastas' : 'Exibir árvore de pastas'}
+        >
+          <PanelLeft className="w-3.5 h-3.5" />
+        </button>
+      )}
+
       {/* File Tabs */}
       {files.map((file) => {
         const isActive = file.id === activeFileId;
@@ -111,9 +140,9 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
             onClick={() => !isEditing && onSelectFile(file.id)}
             onDoubleClick={() => {
               setEditingFileId(file.id);
-              setEditingFileName(file.name);
+              setEditingFileName(file.path || file.name);
             }}
-            className={`group relative flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-t-lg border-t border-x transition-colors cursor-pointer shrink-0 max-w-[180px] ${
+            className={`group relative flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-t-lg border-t border-x transition-colors cursor-pointer shrink-0 max-w-[200px] ${
               isActive
                 ? 'bg-[var(--bg)] text-[var(--text)] border-[var(--border)] font-medium -mb-px pb-2'
                 : 'bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] border-transparent'
@@ -132,9 +161,10 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
                     if (e.key === 'Escape') setEditingFileId(null);
                   }}
                   onBlur={handleConfirmRename}
-                  className="w-20 px-1 py-0.5 bg-[var(--panel)] border border-[var(--accent)] rounded text-xs text-[var(--text)] focus:outline-none"
+                  className="w-24 px-1 py-0.5 bg-[var(--panel)] border border-[var(--accent)] rounded text-xs text-[var(--text)] focus:outline-none"
                 />
                 <button
+                  type="button"
                   onClick={handleConfirmRename}
                   className="text-[var(--accent)] hover:opacity-80 p-0.5"
                 >
@@ -142,7 +172,10 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
                 </button>
               </div>
             ) : (
-              <span className="truncate text-[11px]" title={`${file.name} (Clique duplo para renomear)`}>
+              <span
+                className="truncate text-[11px]"
+                title={`${file.path || file.name} (Clique duplo para renomear)`}
+              >
                 {file.name}
               </span>
             )}
@@ -150,13 +183,14 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
             {/* Quick Rename hover action */}
             {!isEditing && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setEditingFileId(file.id);
-                  setEditingFileName(file.name);
+                  setEditingFileName(file.path || file.name);
                 }}
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--muted)] hover:text-[var(--text)] transition-opacity"
-                title="Renomear arquivo"
+                title="Renomear arquivo/caminho"
               >
                 <Edit2 className="w-2.5 h-2.5" />
               </button>
@@ -165,6 +199,7 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
             {/* Close tab button (only if more than 1 file exists) */}
             {files.length > 1 && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteFile(file.id);
@@ -191,10 +226,11 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
               if (e.key === 'Enter') handleConfirmAdd();
               if (e.key === 'Escape') setIsAdding(false);
             }}
-            placeholder="ex: app.js ou style.css"
-            className="w-32 bg-transparent text-xs text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]/60"
+            placeholder="ex: components/Button.tsx"
+            className="w-36 bg-transparent text-xs text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]/60"
           />
           <button
+            type="button"
             onClick={handleConfirmAdd}
             className="p-1 text-[var(--accent)] hover:opacity-80"
             title="Criar arquivo"
@@ -202,6 +238,7 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
             <Check className="w-3 h-3" />
           </button>
           <button
+            type="button"
             onClick={() => setIsAdding(false)}
             className="p-1 text-[var(--muted)] hover:text-[var(--text)]"
             title="Cancelar"
@@ -212,9 +249,10 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
       ) : (
         <button
           id="btnAddFile"
+          type="button"
           onClick={() => setIsAdding(true)}
           className="flex items-center gap-1 px-2 py-1 text-xs rounded text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] transition-colors cursor-pointer shrink-0 ml-1"
-          title="Adicionar novo arquivo ao projeto"
+          title="Adicionar novo arquivo (suporta pastas como src/App.js)"
         >
           <Plus className="w-3.5 h-3.5" />
           <span className="text-[11px]">Novo Arquivo</span>
@@ -223,3 +261,4 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
     </div>
   );
 };
+
