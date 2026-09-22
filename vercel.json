@@ -17,6 +17,14 @@
       "destination": "/api/ai/test-key"
     },
     {
+      "source": "/api/ai/test-keys",
+      "destination": "/api/ai/test-keys"
+    },
+    {
+      "source": "/api/ai/keys-status",
+      "destination": "/api/ai/keys-status"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

@@ -107,3 +107,50 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
 
   throw lastError || new Error('Falha ao comunicar com a API Gemini.');
 }
+
+export interface KeyTestDirectResult {
+  index: number;
+  keyMask: string;
+  valid: boolean;
+  status: 'valid' | 'invalid' | 'quota';
+  message: string;
+}
+
+export async function testGeminiKeysDirect(
+  keys: string[],
+  model: string = 'gemini-3.8-flash'
+): Promise<KeyTestDirectResult[]> {
+  const results: KeyTestDirectResult[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    const rawKey = keys[i]?.trim();
+    if (!rawKey) continue;
+    const mask = rawKey.length > 8 ? `${rawKey.slice(0, 4)}...${rawKey.slice(-4)}` : '****';
+    try {
+      const ai = new GoogleGenAI({ apiKey: rawKey });
+      await ai.models.generateContent({
+        model,
+        contents: 'ping',
+        config: { maxOutputTokens: 2 },
+      });
+      results.push({
+        index: i,
+        keyMask: mask,
+        valid: true,
+        status: 'valid',
+        message: 'Válida e pronta para uso',
+      });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      const isQuota = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
+      results.push({
+        index: i,
+        keyMask: mask,
+        valid: false,
+        status: isQuota ? 'quota' : 'invalid',
+        message: isQuota ? 'Limite de cota excedido (429)' : msg.slice(0, 80) || 'Chave inválida',
+      });
+    }
+  }
+  return results;
+}
+

@@ -32,7 +32,7 @@ import { importProjectFromZip } from './utils/importZip';
 import { processDroppedData } from './utils/dropHandler';
 import { processImageFiles } from './utils/imageResize';
 import { getShortModelName } from './utils/modelNames';
-import { callGeminiClientDirect } from './utils/geminiClient';
+import { callGeminiClientDirect, testGeminiKeysDirect } from './utils/geminiClient';
 import {
   isFileSystemAccessSupported,
   openLocalFolder,
@@ -846,29 +846,45 @@ export default function App() {
     if (providerToTest === 'gemini') {
       try {
         const keys = cfg.geminiKeys && cfg.geminiKeys.length > 0 ? cfg.geminiKeys : [];
-        const res = await fetch('/api/ai/test-keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            keys,
-            model: cfg.geminiModel || 'gemini-3.8-flash',
-          }),
-        });
-        const data = await safeReadJsonResponse(res);
-        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-          const allValid = data.results.every((r: any) => r.valid);
-          const validCount = data.results.filter((r: any) => r.valid).length;
-          const details = data.results
+        let results: any[] = [];
+
+        try {
+          const res = await fetch('/api/ai/test-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              keys,
+              model: cfg.geminiModel || 'gemini-3.8-flash',
+            }),
+          });
+          if (res.ok) {
+            const data = await safeReadJsonResponse(res);
+            if (data.results && Array.isArray(data.results)) {
+              results = data.results;
+            }
+          }
+        } catch {
+          // fallback para teste direto
+        }
+
+        if (results.length === 0 && keys.length > 0) {
+          results = await testGeminiKeysDirect(keys, cfg.geminiModel || 'gemini-3.8-flash');
+        }
+
+        if (results.length > 0) {
+          const allValid = results.every((r: any) => r.valid);
+          const validCount = results.filter((r: any) => r.valid).length;
+          const details = results
             .map((r: any) => `${r.keyMask}: ${r.valid ? '✓ Válida' : `✗ ${r.message}`}`)
             .join(' | ');
           return {
             success: allValid || validCount > 0,
-            message: `${validCount}/${data.results.length} chave(s) operacionais. (${details})`,
+            message: `${validCount}/${results.length} chave(s) operacionais. (${details})`,
           };
         }
         return {
           success: false,
-          message: data.message || data.error || 'Nenhuma chave Gemini disponível ou testada.',
+          message: 'Nenhuma chave Gemini disponível ou testada.',
         };
       } catch (err: any) {
         return { success: false, message: `Erro ao testar Gemini: ${err.message}` };

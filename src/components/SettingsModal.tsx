@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { ConnectionConfig, AIProvider, AVAILABLE_GEMINI_MODELS } from '../types';
 import { getShortModelName } from '../utils/modelNames';
+import { testGeminiKeysDirect } from '../utils/geminiClient';
 import { Tooltip, InfoTooltip } from './Tooltip';
 
 interface SettingsModalProps {
@@ -314,6 +315,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       [idx]: { status: 'testing', message: 'Verificando chave...' },
     }));
 
+    const testDirectInBrowser = async () => {
+      try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: keyToTest.trim() });
+        await ai.models.generateContent({
+          model: resolvedGeminiModel || 'gemini-3.8-flash',
+          contents: 'ping',
+          config: { maxOutputTokens: 2 },
+        });
+        setIndividualKeyTests((prev) => ({
+          ...prev,
+          [idx]: { status: 'valid', message: 'Válida e pronta para uso' },
+        }));
+      } catch (directErr: any) {
+        const msg = directErr.message || '';
+        const isQuota = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
+        setIndividualKeyTests((prev) => ({
+          ...prev,
+          [idx]: {
+            status: isQuota ? 'quota' : 'invalid',
+            message: isQuota ? 'Limite de cota excedido (429)' : msg || 'Chave inválida',
+          },
+        }));
+      }
+    };
+
     try {
       const res = await fetch('/api/ai/test-key', {
         method: 'POST',
@@ -324,36 +351,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }),
       });
 
-      if (res.status === 404) {
-        try {
-          const { GoogleGenAI } = await import('@google/genai');
-          const ai = new GoogleGenAI({ apiKey: keyToTest.trim() });
-          await ai.models.generateContent({
-            model: resolvedGeminiModel || 'gemini-3.8-flash',
-            contents: 'ping',
-            config: { maxOutputTokens: 2 },
-          });
-          setIndividualKeyTests((prev) => ({
-            ...prev,
-            [idx]: { status: 'valid', message: 'Válida e pronta para uso (verificada diretamente)' },
-          }));
-          return;
-        } catch (directErr: any) {
-          const msg = directErr.message || '';
-          const isQuota = msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
-          setIndividualKeyTests((prev) => ({
-            ...prev,
-            [idx]: {
-              status: isQuota ? 'quota' : 'invalid',
-              message: msg || 'Chave inválida ou limite excedido',
-            },
-          }));
-          return;
-        }
+      if (!res.ok) {
+        await testDirectInBrowser();
+        return;
       }
 
-      const data = await res.json();
-      if (res.ok && data.valid) {
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        await testDirectInBrowser();
+        return;
+      }
+
+      if (data.valid) {
         setIndividualKeyTests((prev) => ({
           ...prev,
           [idx]: { status: 'valid', message: 'Válida e pronta para uso' },
@@ -371,11 +382,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           },
         }));
       }
-    } catch (err: any) {
-      setIndividualKeyTests((prev) => ({
-        ...prev,
-        [idx]: { status: 'invalid', message: `Erro ao testar: ${err.message}` },
-      }));
+    } catch {
+      await testDirectInBrowser();
     }
   };
 
@@ -678,22 +686,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       if (activeTab === 'keys') {
         // Tab 2: Test all Gemini keys in batch
-        const res = await fetch('/api/ai/test-keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            keys: geminiKeys,
-            model: resolvedGeminiModel,
-          }),
-        });
-        const data = await res.json();
-        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-          const allValid = data.results.every((r: any) => r.valid);
-          const validCount = data.results.filter((r: any) => r.valid).length;
+        let results: any[] = [];
+        try {
+          const res = await fetch('/api/ai/test-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              keys: geminiKeys,
+              model: resolvedGeminiModel,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.results && Array.isArray(data.results)) {
+              results = data.results;
+            }
+          }
+        } catch {
+          // fallback para teste direto no navegador
+        }
+
+        // Se a rota retornou 404 (ex: Vercel sem backend ativo) ou falhou, testa direto no navegador
+        if (results.length === 0 && geminiKeys.length > 0) {
+          try {
+            results = await testGeminiKeysDirect(geminiKeys, resolvedGeminiModel);
+          } catch (directErr: any) {
+            setTestResult({
+              success: false,
+              message: `Falha ao testar chaves: ${directErr.message || directErr}`,
+            });
+            return;
+          }
+        }
+
+        if (results.length > 0) {
+          const allValid = results.every((r: any) => r.valid);
+          const validCount = results.filter((r: any) => r.valid).length;
 
           // Update individual states
           const newTests: Record<number, { status: any; message: string }> = {};
-          data.results.forEach((r: any) => {
+          results.forEach((r: any) => {
             newTests[r.index] = {
               status: r.status,
               message: r.message,
@@ -701,18 +733,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           });
           setIndividualKeyTests(newTests);
 
-          const summary = data.results
+          const summary = results
             .map((r: any) => `${r.keyMask}: ${r.valid ? '✓ Válida' : `✗ ${r.message}`}`)
             .join(' | ');
 
           setTestResult({
             success: allValid || validCount > 0,
-            message: `${validCount}/${data.results.length} chave(s) operacionais. (${summary})`,
+            message: `${validCount}/${results.length} chave(s) operacionais. (${summary})`,
           });
         } else {
           setTestResult({
             success: false,
-            message: data.message || 'Nenhuma chave Gemini disponível para teste.',
+            message: 'Nenhuma chave Gemini disponível para teste.',
           });
         }
       } else if (activeTab === 'colab') {
