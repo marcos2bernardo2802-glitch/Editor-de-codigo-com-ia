@@ -96,8 +96,9 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Brand, Mode & MenuBar */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-sm font-semibold tracking-tight text-[var(--text)] m-0">
-            GenIA
+          <h1 className="text-base font-bold tracking-tight m-0 inline-flex items-center select-none animate-genia-pulse cursor-default">
+            <span className="text-orange-500 dark:text-orange-400 font-extrabold tracking-tight">Gen</span>
+            <span className="text-sky-500 dark:text-sky-400 font-black tracking-wide ml-0.5">IA</span>
           </h1>
           <span
             className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--panel-2)] text-[var(--muted)]"

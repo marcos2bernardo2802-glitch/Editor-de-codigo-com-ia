@@ -146,6 +146,26 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
 
+  if (signal) {
+    if (signal.aborted) {
+      try {
+        reader.cancel();
+      } catch {}
+      const err = new Error('Requisição cancelada pelo usuário.');
+      err.name = 'AbortError';
+      throw err;
+    }
+    signal.addEventListener(
+      'abort',
+      () => {
+        try {
+          reader.cancel();
+        } catch {}
+      },
+      { once: true }
+    );
+  }
+
   let buffer = '';
   let accumulatedContent = '';
   let accumulatedThinking = '';

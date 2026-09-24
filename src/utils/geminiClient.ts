@@ -11,6 +11,7 @@ export interface GeminiCallOptions {
   activeFilePath?: string;
   selectedText?: string;
   images?: { base64: string; mimeType: string }[];
+  signal?: AbortSignal;
 }
 
 export async function callGeminiClientDirect(options: GeminiCallOptions): Promise<{ text: string; model: string }> {
@@ -25,7 +26,14 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
     activeFilePath,
     selectedText,
     images = [],
+    signal,
   } = options;
+
+  if (signal?.aborted) {
+    const err = new Error('Operação cancelada pelo usuário.');
+    err.name = 'AbortError';
+    throw err;
+  }
 
   const validKeys = keys.map((k) => k.trim()).filter(Boolean);
   if (validKeys.length === 0) {
@@ -75,6 +83,12 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
   let lastError: any = null;
 
   for (const key of validKeys) {
+    if (signal?.aborted) {
+      const err = new Error('Operação cancelada pelo usuário.');
+      err.name = 'AbortError';
+      throw err;
+    }
+
     try {
       const ai = new GoogleGenAI({
         apiKey: key,
@@ -85,7 +99,7 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
         },
       });
 
-      const response = await ai.models.generateContent({
+      const generatePromise = ai.models.generateContent({
         model,
         contents: [{ role: 'user', parts: promptParts }],
         config: {
@@ -93,9 +107,38 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
         },
       });
 
+      let response: any;
+      if (signal) {
+        response = await Promise.race([
+          generatePromise,
+          new Promise((_, reject) => {
+            if (signal.aborted) {
+              const err = new Error('Operação cancelada pelo usuário.');
+              err.name = 'AbortError';
+              reject(err);
+            } else {
+              signal.addEventListener(
+                'abort',
+                () => {
+                  const err = new Error('Operação cancelada pelo usuário.');
+                  err.name = 'AbortError';
+                  reject(err);
+                },
+                { once: true }
+              );
+            }
+          }),
+        ]);
+      } else {
+        response = await generatePromise;
+      }
+
       const text = response.text || '';
       return { text, model };
     } catch (err: any) {
+      if (err.name === 'AbortError' || signal?.aborted) {
+        throw err;
+      }
       lastError = err;
       const msg = String(err?.message || '');
       if (msg.includes('429') || msg.includes('quota') || msg.includes('503')) {

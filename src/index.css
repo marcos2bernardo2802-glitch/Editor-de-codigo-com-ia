@@ -62,3 +62,28 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
 }
+
+/* Animação suave para destacar o título GenIA */
+@keyframes geniaGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 1px rgba(249, 115, 22, 0.2)) drop-shadow(0 0 2px rgba(56, 189, 248, 0.2));
+    transform: translateY(0);
+  }
+  50% {
+    filter: drop-shadow(0 0 7px rgba(249, 115, 22, 0.55)) drop-shadow(0 0 9px rgba(56, 189, 248, 0.5));
+    transform: translateY(-0.5px);
+  }
+}
+
+.animate-genia-pulse {
+  animation: geniaGlow 3.6s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  transition: transform 0.25s ease, filter 0.25s ease;
+}
+
+.animate-genia-pulse:hover {
+  transform: scale(1.05);
+  filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.75)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.7));
+}
+

@@ -373,6 +373,63 @@ export default function App() {
     return saved === 'light' ? 'light' : 'dark';
   });
 
+  // Chat Panel Resizing State (Desktop)
+  const [chatWidth, setChatWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('genia_chat_panel_width');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 280 && parsed <= 1200) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return 420;
+  });
+  const [isDraggingChatWidth, setIsDraggingChatWidth] = useState<boolean>(false);
+  const mainContainerRef = useRef<HTMLElement>(null);
+
+  // Handle dragging resize between Code Editor and AI Chat
+  const handleStartResizeChat = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingChatWidth(true);
+  };
+
+  const handleResetChatWidth = () => {
+    setChatWidth(420);
+  };
+
+  useEffect(() => {
+    if (!isDraggingChatWidth) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!mainContainerRef.current) return;
+      const rect = mainContainerRef.current.getBoundingClientRect();
+      const newWidth = rect.right - e.clientX;
+      const minWidth = 280;
+      const maxWidth = Math.max(minWidth, rect.width - 320);
+      const clamped = Math.min(Math.max(newWidth, minWidth), maxWidth);
+      setChatWidth(clamped);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingChatWidth(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingChatWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('genia_chat_panel_width', chatWidth.toString());
+    } catch {}
+  }, [chatWidth]);
+
   // Version History Checkpoints State (Sugestão Extra: Checkpoints)
   const [checkpoints, setCheckpoints] = useState<VersionCheckpoint[]>(() => [
     {
@@ -412,10 +469,38 @@ export default function App() {
 
   const handleCancelInstruction = useCallback(() => {
     if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
+      try {
+        activeAbortControllerRef.current.abort();
+      } catch (err) {
+        console.warn('Erro ao abortar requisição ativa:', err);
+      }
       activeAbortControllerRef.current = null;
     }
-  }, []);
+
+    setIsLoading(false);
+    setIsAnalyzingVision(false);
+
+    setMessages((prev) => {
+      const filtered = prev.filter((m) => !m.streaming);
+      const lastMsg = filtered[filtered.length - 1];
+      if (lastMsg && (lastMsg.text?.includes('interrompida') || lastMsg.text?.includes('cancelada'))) {
+        return filtered;
+      }
+      return [
+        ...filtered,
+        {
+          id: `cancel-${Date.now()}`,
+          type: 'explanation',
+          text: '⏹️ Geração interrompida pelo usuário.',
+          mode: interactionMode,
+          timestamp: Date.now(),
+        },
+      ];
+    });
+
+    setStatus('connected');
+    setStatusText('interrompido');
+  }, [interactionMode]);
 
   // Check initial environment health
   useEffect(() => {
@@ -1229,6 +1314,9 @@ ${userPromptText}`
     setInstruction('');
     setIsLoading(true);
 
+    const abortController = new AbortController();
+    activeAbortControllerRef.current = abortController;
+
     const currentCode = code;
 
     // Quando workspaceMode === 'project', enviamos todos os arquivos do projeto e o path do arquivo ativo
@@ -1258,6 +1346,7 @@ ${userPromptText}`
             const res = await fetch('/api/ai/plan', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              signal: abortController.signal,
               body: JSON.stringify({
                 instruction: effectiveInstruction,
                 message: effectiveInstruction,
@@ -1286,6 +1375,7 @@ ${userPromptText}`
                 projectFiles: projectFilesPayload,
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+                signal: abortController.signal,
               });
               planText = fallback.text;
             } else {
@@ -1297,6 +1387,9 @@ ${userPromptText}`
               usedKeyMask = data.usedKeyMask || data.usedKey;
             }
           } catch (apiErr: any) {
+            if (apiErr.name === 'AbortError' || abortController.signal.aborted) {
+              throw apiErr;
+            }
             if (config.geminiKeys && config.geminiKeys.length > 0) {
               const fallback = await callGeminiClientDirect({
                 instruction: effectiveInstruction,
@@ -1309,6 +1402,7 @@ ${userPromptText}`
                 projectFiles: projectFilesPayload,
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+                signal: abortController.signal,
               });
               planText = fallback.text;
             } else {
@@ -1530,6 +1624,7 @@ ${effectiveInstruction}`
             const res = await fetch('/api/ai/edit', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
+              signal: abortController.signal,
               body: JSON.stringify({
                 code: currentCode,
                 selectedText: isSelection && capturedSelection ? capturedSelection.text : undefined,
@@ -1557,6 +1652,7 @@ ${effectiveInstruction}`
                 projectFiles: projectFilesPayload,
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+                signal: abortController.signal,
               });
               returnedSnippetOrCode = fallback.text;
             } else {
@@ -1568,6 +1664,9 @@ ${effectiveInstruction}`
               usedKeyMask = data.usedKeyMask;
             }
           } catch (apiErr: any) {
+            if (apiErr.name === 'AbortError' || abortController.signal.aborted) {
+              throw apiErr;
+            }
             if (config.geminiKeys && config.geminiKeys.length > 0) {
               const fallback = await callGeminiClientDirect({
                 instruction: effectiveInstruction,
@@ -1580,6 +1679,7 @@ ${effectiveInstruction}`
                 projectFiles: projectFilesPayload,
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
+                signal: abortController.signal,
               });
               returnedSnippetOrCode = fallback.text;
             } else {
@@ -1872,8 +1972,37 @@ ${effectiveInstruction}`;
       }
     } catch (err: any) {
       console.error('Erro na requisição da IA:', err);
-      const isAbort = err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('cancelad');
+      const isAbort =
+        abortController.signal.aborted ||
+        err.name === 'AbortError' ||
+        err.message?.includes('aborted') ||
+        err.message?.includes('cancelad') ||
+        err.message?.includes('interrompid');
+
       setMessages((prev) => prev.filter((m) => !m.streaming));
+
+      if (isAbort) {
+        setMessages((prev) => {
+          const filtered = prev.filter((m) => !m.streaming);
+          const last = filtered[filtered.length - 1];
+          if (last && (last.text?.includes('interrompida') || last.text?.includes('cancelada'))) {
+            return filtered;
+          }
+          return [
+            ...filtered,
+            {
+              id: `cancel-${Date.now()}`,
+              type: 'explanation',
+              text: '⏹️ Geração interrompida pelo usuário.',
+              mode: currentMode,
+              timestamp: Date.now(),
+            },
+          ];
+        });
+        setStatus('connected');
+        setStatusText('interrompido');
+        return;
+      }
 
       const errMsg = err.message || '';
       const isBackendMissing =
@@ -1924,13 +2053,14 @@ ${effectiveInstruction}`;
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, errorMsg]);
-      if (!isAbort) {
-        setStatus('disconnected');
-        setStatusText('erro na conexão');
-      }
+      setStatus('disconnected');
+      setStatusText('erro na conexão');
     } finally {
       setIsLoading(false);
-      activeAbortControllerRef.current = null;
+      setIsAnalyzingVision(false);
+      if (activeAbortControllerRef.current === abortController) {
+        activeAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -2336,7 +2466,7 @@ ${effectiveInstruction}`;
       />
 
       {/* Main Content Area (Split layout) */}
-      <main className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
+      <main ref={mainContainerRef} className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden relative">
         {/* Left / Center: Code Editor & In-Window Visualizer */}
         <CodeEditorPanel
           code={code}
@@ -2377,8 +2507,53 @@ ${effectiveInstruction}`;
           checkpointCount={checkpoints.length}
         />
 
+        {/* Draggable Divider between Code Editor and AI Chat (Desktop) */}
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+          aria-label="Ajustar divisão entre código e chat com IA"
+          aria-valuenow={chatWidth}
+          onMouseDown={handleStartResizeChat}
+          onDoubleClick={handleResetChatWidth}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              setChatWidth((prev) =>
+                Math.min(
+                  prev + 20,
+                  (mainContainerRef.current?.getBoundingClientRect().width || 1000) - 320
+                )
+              );
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              setChatWidth((prev) => Math.max(prev - 20, 280));
+            } else if (e.key === 'Home' || e.key === 'Enter') {
+              e.preventDefault();
+              handleResetChatWidth();
+            }
+          }}
+          className={`hidden md:flex flex-col items-center justify-center w-2 -mx-1 z-20 cursor-col-resize select-none shrink-0 group transition-colors relative ${
+            isDraggingChatWidth ? 'bg-[var(--accent)]/30' : 'hover:bg-[var(--accent)]/20'
+          }`}
+          title="Arraste para regular o tamanho dos dois campos (Duplo clique para redefinir)"
+        >
+          {/* Extended invisible touch/mouse hit area */}
+          <div className="absolute inset-y-0 -left-2 -right-2 z-10" />
+
+          {/* Visual Grip Handle */}
+          <div
+            className={`w-1 rounded-full transition-all duration-150 ${
+              isDraggingChatWidth
+                ? 'h-14 bg-[var(--accent)] shadow-sm'
+                : 'h-8 bg-[var(--muted)]/40 group-hover:h-12 group-hover:bg-[var(--accent)]'
+            }`}
+          />
+        </div>
+
         {/* Right: AI Commands & Diff Chat */}
         <SidePanel
+          width={chatWidth}
           messages={messages}
           instruction={instruction}
           isLoading={isLoading}
@@ -2409,9 +2584,17 @@ ${effectiveInstruction}`;
           selection={selection}
           onClearSelection={() => setSelection(null)}
           onExplainCode={handleExplainCode}
-          onCancelInstruction={isLoading || isAnalyzingVision ? handleCancelInstruction : undefined}
+          onCancelInstruction={handleCancelInstruction}
         />
       </main>
+
+      {/* Global Transparent Overlay during drag to prevent iframe event interception */}
+      {isDraggingChatWidth && (
+        <div
+          className="fixed inset-0 z-[9999] cursor-col-resize select-none"
+          style={{ userSelect: 'none' }}
+        />
+      )}
 
       {/* Settings Modal */}
       <SettingsModal

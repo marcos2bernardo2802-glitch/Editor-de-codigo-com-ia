@@ -71,6 +71,9 @@ interface SidePanelProps {
   onClearSelection: () => void;
   onExplainCode?: () => void;
   onCancelInstruction?: () => void;
+
+  // Resizable panel width (desktop)
+  width?: number;
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -102,12 +105,24 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   onClearSelection,
   onExplainCode,
   onCancelInstruction,
+  width,
 }) => {
   const chatLogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const dragCounter = useRef(0);
+  const [isDesktop, setIsDesktop] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 768 : true
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Estado de expansão dos diffs lembrado por mensagem
   const [expandedDiffs, setExpandedDiffs] = useState<Record<string, boolean>>({});
@@ -204,7 +219,10 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   const fullModelTooltip = activeFullModelInfo || `Provedor: ${activeProvider}`;
 
   return (
-    <aside className="w-full md:w-[380px] lg:w-[440px] shrink-0 flex flex-col bg-[var(--panel)] h-full overflow-hidden border-t md:border-t-0 md:border-l border-[var(--border)]">
+    <aside
+      style={width && isDesktop ? { width: `${width}px` } : undefined}
+      className={`w-full ${width && isDesktop ? '' : 'md:w-[380px] lg:w-[440px]'} shrink-0 flex flex-col bg-[var(--panel)] h-full overflow-hidden border-t md:border-t-0 md:border-l border-[var(--border)]`}
+    >
       {/* 1. Header do chat: compacto e discreto */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--border)] shrink-0 select-none bg-[var(--panel)]">
         <div className="flex items-center gap-1.5">
@@ -430,19 +448,19 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                 key={msg.id}
                 className="bg-[var(--panel-2)] border border-[var(--border)] rounded-2xl rounded-bl-xs p-3 text-xs text-[var(--text)] flex flex-col gap-2 shadow-2xs"
               >
-                {/* Cabeçalho da resposta: nome completo apenas no tooltip */}
+                {/* Cabeçalho da resposta: menor e mais discreto */}
                 <div
-                  className="font-semibold text-xs flex items-center justify-between border-b border-[var(--border)]/60 pb-1.5 cursor-default"
+                  className="flex items-center justify-between border-b border-[var(--border)]/40 pb-1 cursor-default select-none"
                   title={msg.provider || fullModelTooltip}
                 >
-                  <span className="flex items-center gap-1.5 text-blue-400">
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Resposta de Planejamento</span>
+                  <span className="flex items-center gap-1.5 text-[10px] font-medium text-[var(--muted)]">
+                    <MessageSquare className="w-2.5 h-2.5 text-blue-400/70 shrink-0" />
+                    <span className="tracking-tight text-blue-400/80">Resposta de Planejamento</span>
                   </span>
 
                   {msg.usedKeyMask && (
                     <span
-                      className="inline-flex items-center gap-1 text-[9.5px] px-1.5 py-0.2 rounded bg-[var(--panel)] border border-[var(--border)] text-[var(--muted)] font-mono"
+                      className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.2 rounded bg-[var(--panel)] border border-[var(--border)] text-[var(--muted)] font-mono"
                       title="Chave de API utilizada"
                     >
                       <ShieldCheck className="w-2.5 h-2.5 text-[var(--accent)]" />
@@ -839,7 +857,11 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <button
               id="btnStop"
               type="button"
-              onClick={onCancelInstruction}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onCancelInstruction?.();
+              }}
               className="p-2 rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 font-semibold transition-all cursor-pointer flex items-center justify-center shadow-xs active:scale-95 shrink-0"
               title="Parar geração"
               aria-label="Parar geração"
