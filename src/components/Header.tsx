@@ -95,9 +95,6 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none">
       {/* Brand, Mode & MenuBar */}
       <div className="flex items-center gap-3">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[var(--accent-dim)] flex items-center justify-center font-mono text-xs font-bold text-[#14161d] shadow-sm">
-          IA
-        </div>
         <div className="flex items-center gap-2">
           <h1 className="text-sm font-semibold tracking-tight text-[var(--text)] m-0">
             GenIA
@@ -207,20 +204,20 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           id="btnTemplates"
           onClick={onOpenTemplates}
-          className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-lg bg-transparent transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-2 py-1 text-[11px] text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-md bg-transparent transition-colors cursor-pointer"
           title="Exemplos de código para testar"
         >
-          <Code2 className="w-3.5 h-3.5" />
+          <Code2 className="w-3 h-3" />
           <span className="hidden sm:inline">Exemplos</span>
         </button>
 
         <button
           id="btnSettings"
           onClick={onOpenSettings}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--text)] bg-[var(--panel-2)] hover:bg-[var(--border)] border border-[var(--border)] rounded-lg transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-[var(--text)] bg-[var(--panel-2)] hover:bg-[var(--border)] border border-[var(--border)] rounded-md transition-colors cursor-pointer"
           title="Configurações de conexão da IA"
         >
-          <Settings className="w-3.5 h-3.5 text-[var(--accent)]" />
+          <Settings className="w-3 h-3 text-[var(--accent)]" />
           <span>Conexão</span>
         </button>
       </div>
