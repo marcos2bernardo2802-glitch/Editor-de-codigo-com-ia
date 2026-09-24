@@ -1,5 +1,5 @@
 {
-  "name": "Editor de Código com IA",
+  "name": "GenIA",
   "description": "Editor de código inteligente com IA integrada e suporte a endpoints Colab/ngrok com visualização de diff interativo.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

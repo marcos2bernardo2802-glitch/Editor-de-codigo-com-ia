@@ -1,24 +1,12 @@
-import React, { useState, useRef } from 'react';
+import React from 'react';
 import {
-  Copy,
-  Download,
-  RotateCcw,
-  RotateCw,
   Settings,
-  Check,
   Code2,
-  Sparkles,
-  Network,
-  Sun,
-  Moon,
-  FolderArchive,
-  FolderDown,
-  FolderUp,
-  Save,
   HardDrive,
   FolderCheck,
 } from 'lucide-react';
-import { ConnectionConfig, ThemeMode } from '../types';
+import { ConnectionConfig, ThemeMode, EditorViewMode } from '../types';
+import { MenuBar } from './MenuBar';
 
 interface HeaderProps {
   status: 'connected' | 'disconnected' | 'testing';
@@ -42,6 +30,26 @@ interface HeaderProps {
   isSavingLocal?: boolean;
   onSaveLocalFolder?: () => void;
   onOpenLocalFolderSettings?: () => void;
+
+  // MenuBar props
+  onOpenVersionHistory?: () => void;
+  checkpointCount?: number;
+  onFormatCode?: () => void;
+  onClearCode: () => void;
+  language: string;
+  onChangeLanguage: (lang: string) => void;
+
+  // MenuBar "Exibir" props
+  lineWrapping: boolean;
+  onToggleLineWrapping: () => void;
+  fontSize: number;
+  onChangeFontSize: (size: number) => void;
+  isExplorerOpen: boolean;
+  onToggleExplorer: () => void;
+  showDiagnostics: boolean;
+  onToggleDiagnostics: () => void;
+  viewMode: EditorViewMode;
+  onChangeViewMode: (mode: EditorViewMode) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -66,34 +74,33 @@ export const Header: React.FC<HeaderProps> = ({
   isSavingLocal = false,
   onSaveLocalFolder,
   onOpenLocalFolderSettings,
+  onOpenVersionHistory,
+  checkpointCount = 0,
+  onFormatCode,
+  onClearCode,
+  language,
+  onChangeLanguage,
+  lineWrapping,
+  onToggleLineWrapping,
+  fontSize,
+  onChangeFontSize,
+  isExplorerOpen,
+  onToggleExplorer,
+  showDiagnostics,
+  onToggleDiagnostics,
+  viewMode,
+  onChangeViewMode,
 }) => {
-  const [copied, setCopied] = useState(false);
-  const zipInputRef = useRef<HTMLInputElement>(null);
-
-  const handleCopy = () => {
-    onCopy();
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-  };
-
-  const handleZipFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && onImportZip) {
-      onImportZip(file);
-    }
-    e.target.value = '';
-  };
-
   return (
     <header className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none">
-      {/* Brand & Mode */}
+      {/* Brand, Mode & MenuBar */}
       <div className="flex items-center gap-3">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[var(--accent)] to-[var(--accent-dim)] flex items-center justify-center font-mono text-xs font-bold text-[#14161d] shadow-sm">
           IA
         </div>
         <div className="flex items-center gap-2">
           <h1 className="text-sm font-semibold tracking-tight text-[var(--text)] m-0">
-            Editor de Código com IA
+            GenIA
           </h1>
           <span
             className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--panel-2)] text-[var(--muted)]"
@@ -112,6 +119,39 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </span>
         </div>
+
+        {/* Separator and Horizontal MenuBar (Arquivo, Editar, Exibir) */}
+        <div className="h-4 w-[1px] bg-[var(--border)] hidden sm:block mx-1" />
+        <MenuBar
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={onUndo}
+          onRedo={onRedo}
+          onCopy={onCopy}
+          onDownload={onDownload}
+          onExportZip={onExportZip}
+          onImportZip={onImportZip}
+          onSaveLocalFolder={onSaveLocalFolder}
+          onOpenLocalFolderSettings={onOpenLocalFolderSettings}
+          onOpenVersionHistory={onOpenVersionHistory}
+          checkpointCount={checkpointCount}
+          onFormatCode={onFormatCode}
+          onClearCode={onClearCode}
+          language={language}
+          onChangeLanguage={onChangeLanguage}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          lineWrapping={lineWrapping}
+          onToggleLineWrapping={onToggleLineWrapping}
+          fontSize={fontSize}
+          onChangeFontSize={onChangeFontSize}
+          isExplorerOpen={isExplorerOpen}
+          onToggleExplorer={onToggleExplorer}
+          showDiagnostics={showDiagnostics}
+          onToggleDiagnostics={onToggleDiagnostics}
+          viewMode={viewMode}
+          onChangeViewMode={onChangeViewMode}
+        />
       </div>
 
       {/* Status indicator & Local folder indicator */}
@@ -164,21 +204,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Actions */}
       <div className="flex items-center gap-1.5 sm:gap-2">
-        {/* Theme toggle button */}
-        <button
-          id="btnThemeToggle"
-          onClick={onToggleTheme}
-          className="w-8 h-8 rounded-lg border border-[var(--border)] hover:border-[var(--muted)] flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] bg-transparent transition-colors cursor-pointer"
-          title={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
-          aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
-        >
-          {theme === 'dark' ? (
-            <Sun className="w-4 h-4 text-[var(--accent)]" />
-          ) : (
-            <Moon className="w-4 h-4 text-[var(--accent)]" />
-          )}
-        </button>
-
         <button
           id="btnTemplates"
           onClick={onOpenTemplates}
@@ -188,99 +213,6 @@ export const Header: React.FC<HeaderProps> = ({
           <Code2 className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Exemplos</span>
         </button>
-
-        <button
-          id="btnCopy"
-          onClick={handleCopy}
-          className="w-8 h-8 rounded-lg border border-[var(--border)] hover:border-[var(--muted)] flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] bg-transparent transition-colors cursor-pointer"
-          title="Copiar código atual"
-        >
-          {copied ? <Check className="w-4 h-4 text-[var(--add)]" /> : <Copy className="w-4 h-4" />}
-        </button>
-
-        {/* Download single active file */}
-        <button
-          id="btnDownload"
-          onClick={onDownload}
-          className="w-8 h-8 rounded-lg border border-[var(--border)] hover:border-[var(--muted)] flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] bg-transparent transition-colors cursor-pointer"
-          title="Baixar arquivo de código individual"
-        >
-          <Download className="w-4 h-4" />
-        </button>
-
-        {/* Hidden Zip file input */}
-        <input
-          ref={zipInputRef}
-          type="file"
-          accept=".zip"
-          onChange={handleZipFileChange}
-          className="hidden"
-        />
-
-        {/* Import ZIP Button */}
-        {onImportZip && (
-          <button
-            id="btnImportZip"
-            type="button"
-            onClick={() => zipInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-lg bg-transparent transition-colors cursor-pointer"
-            title="Importar projeto (.zip)"
-          >
-            <FolderUp className="w-3.5 h-3.5 text-[var(--accent)]" />
-            <span className="hidden lg:inline">Importar .zip</span>
-          </button>
-        )}
-
-        {/* Export ZIP Button */}
-        {onExportZip && (
-          <button
-            id="btnExportZip"
-            type="button"
-            onClick={onExportZip}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-lg bg-transparent transition-colors cursor-pointer"
-            title="Exportar projeto completo em .zip"
-          >
-            <FolderDown className="w-3.5 h-3.5 text-[var(--accent)]" />
-            <span className="hidden lg:inline">Exportar .zip</span>
-          </button>
-        )}
-
-        {/* Local Folder Save Button (Manual Mode) */}
-        {localFolderConnected && saveMode === 'manual' && onSaveLocalFolder && (
-          <button
-            id="btnSaveLocalFolder"
-            type="button"
-            onClick={onSaveLocalFolder}
-            disabled={isSavingLocal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/60 rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50"
-            title="Salvar alterações no disco local (Ctrl+S / Cmd+S)"
-          >
-            <Save className={`w-3.5 h-3.5 ${isSavingLocal ? 'animate-bounce' : ''}`} />
-            <span>{isSavingLocal ? 'Salvando...' : 'Salvar disco'}</span>
-          </button>
-        )}
-
-        <div className="flex items-center border border-[var(--border)] rounded-lg overflow-hidden">
-          <button
-            id="btnUndo"
-            onClick={onUndo}
-            disabled={!canUndo}
-            className="w-8 h-8 flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed bg-transparent transition-colors cursor-pointer"
-            title="Desfazer alteração"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-          <div className="w-[1px] h-4 bg-[var(--border)]" />
-          <button
-            id="btnRedo"
-            onClick={onRedo}
-            disabled={!canRedo}
-            className="w-8 h-8 flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed bg-transparent transition-colors cursor-pointer"
-            title="Refazer alteração"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-          </button>
-        </div>
 
         <button
           id="btnSettings"

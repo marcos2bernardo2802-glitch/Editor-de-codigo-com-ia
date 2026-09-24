@@ -366,6 +366,8 @@ export default function App() {
   const [viewMode, setViewMode] = useState<EditorViewMode>('code');
   const [lineWrapping, setLineWrapping] = useState<boolean>(true);
   const [fontSize, setFontSize] = useState<number>(13);
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(true);
+  const [isExplorerOpen, setIsExplorerOpen] = useState<boolean>(true);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('editor_theme');
     return saved === 'light' ? 'light' : 'dark';
@@ -2266,6 +2268,15 @@ ${effectiveInstruction}`;
     setSelection(null);
   };
 
+  // Change language
+  const handleChangeLanguage = (lang: string) => {
+    const supportedLang = lang as SupportedLanguage;
+    setLanguage(supportedLang);
+    setFiles((prev) =>
+      prev.map((f) => (f.id === activeFileId ? { ...f, language: supportedLang } : f))
+    );
+  };
+
   return (
     <div
       onDragEnter={handleDragEnter}
@@ -2306,6 +2317,22 @@ ${effectiveInstruction}`;
           setSettingsDefaultTab('localFolder');
           setIsSettingsOpen(true);
         }}
+        onOpenVersionHistory={() => setIsVersionHistoryOpen(true)}
+        checkpointCount={checkpoints.length}
+        onFormatCode={handleFormatCode}
+        onClearCode={handleClearCode}
+        language={language}
+        onChangeLanguage={handleChangeLanguage}
+        lineWrapping={lineWrapping}
+        onToggleLineWrapping={() => setLineWrapping(!lineWrapping)}
+        fontSize={fontSize}
+        onChangeFontSize={setFontSize}
+        isExplorerOpen={isExplorerOpen}
+        onToggleExplorer={() => setIsExplorerOpen(!isExplorerOpen)}
+        showDiagnostics={showDiagnostics}
+        onToggleDiagnostics={() => setShowDiagnostics(!showDiagnostics)}
+        viewMode={viewMode}
+        onChangeViewMode={(mode) => setViewMode(mode)}
       />
 
       {/* Main Content Area (Split layout) */}
@@ -2317,18 +2344,17 @@ ${effectiveInstruction}`;
           theme={theme}
           viewMode={viewMode}
           onChangeViewMode={(mode) => setViewMode(mode)}
-          onChangeLanguage={(lang) => {
-            setLanguage(lang);
-            setFiles((prev) =>
-              prev.map((f) => (f.id === activeFileId ? { ...f, language: lang } : f))
-            );
-          }}
+          onChangeLanguage={handleChangeLanguage}
           onChangeCode={handleChangeCode}
           onClearCode={handleClearCode}
           lineWrapping={lineWrapping}
           onToggleLineWrapping={() => setLineWrapping(!lineWrapping)}
           fontSize={fontSize}
           onChangeFontSize={setFontSize}
+          showDiagnostics={showDiagnostics}
+          onToggleDiagnostics={() => setShowDiagnostics(!showDiagnostics)}
+          isExplorerOpen={isExplorerOpen}
+          onToggleExplorer={() => setIsExplorerOpen(!isExplorerOpen)}
           // Selection & AI Scope
           selection={selection}
           onSelectionChange={setSelection}
