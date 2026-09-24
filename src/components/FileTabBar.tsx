@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, X, FileCode, FileText, Check, Edit2, PanelLeft, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Plus, X, FileCode, FileText, Check, Edit2 } from 'lucide-react';
 import { ProjectFile, SupportedLanguage } from '../types';
 import {
   detectLanguageFromName,
@@ -113,30 +113,6 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
 
   return (
     <div className="flex items-center gap-1 px-2 pt-1 bg-[var(--panel-2)] border-b border-[var(--border)] overflow-x-auto no-scrollbar shrink-0 select-none">
-      {/* Explorer Toggle Button */}
-      {onToggleExplorer && (
-        <button
-          type="button"
-          onClick={onToggleExplorer}
-          className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors cursor-pointer mr-1 shrink-0 ${
-            isExplorerOpen
-              ? 'bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30 font-medium'
-              : 'bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--bg)] border border-[var(--border)]'
-          }`}
-          title={isExplorerOpen ? 'Recolher árvore de arquivos (Ctrl+B)' : 'Expandir árvore de arquivos (Ctrl+B)'}
-          aria-label={isExplorerOpen ? 'Recolher árvore de arquivos' : 'Expandir árvore de arquivos'}
-        >
-          {isExplorerOpen ? (
-            <PanelLeftClose className="w-3.5 h-3.5" />
-          ) : (
-            <PanelLeftOpen className="w-3.5 h-3.5" />
-          )}
-          <span className="text-[11px] font-medium hidden md:inline">
-            {isExplorerOpen ? 'Recolher árvore' : 'Árvore'}
-          </span>
-        </button>
-      )}
-
       {/* File Tabs */}
       {files.map((file) => {
         const isActive = file.id === activeFileId;
