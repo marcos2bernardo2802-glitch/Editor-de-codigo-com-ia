@@ -12,7 +12,7 @@ import {
   ChevronUp,
   FileCode,
 } from 'lucide-react';
-import { SupportedLanguage, ProjectFile, PreviewLogItem } from '../types';
+import { SupportedLanguage, ProjectFile, PreviewLogItem, ThemeMode } from '../types';
 import { generatePreviewHtml, getAvailableHtmlFiles, isRealHtmlFile } from '../utils/preview';
 
 interface LivePreviewPaneProps {
@@ -21,6 +21,7 @@ interface LivePreviewPaneProps {
   projectFiles?: ProjectFile[];
   activeFileId?: string;
   onSelectFile?: (id: string) => void;
+  theme?: ThemeMode;
 }
 
 type DeviceMode = 'desktop' | 'tablet' | 'mobile';
@@ -31,6 +32,7 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
   projectFiles,
   activeFileId,
   onSelectFile,
+  theme = 'dark',
 }) => {
   const [device, setDevice] = useState<DeviceMode>('desktop');
   const [refreshKey, setRefreshKey] = useState<number>(0);
@@ -70,7 +72,8 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
         projectFiles,
         initialUrls,
         activeFileId,
-        currentPreviewFileId || undefined
+        currentPreviewFileId || undefined,
+        theme
       );
       blobUrlsRef.current = initialUrls;
       return res;
@@ -98,7 +101,8 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
         projectFiles,
         createdUrls,
         activeFileId,
-        currentPreviewFileId || undefined
+        currentPreviewFileId || undefined,
+        theme
       );
       blobUrlsRef.current = createdUrls;
       setHtmlContent(html);
@@ -116,7 +120,7 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
         blobUrlsRef.current = [];
       }
     };
-  }, [code, language, projectFiles, activeFileId, currentPreviewFileId, refreshKey]);
+  }, [code, language, projectFiles, activeFileId, currentPreviewFileId, refreshKey, theme]);
 
   const deviceWidthMap: Record<DeviceMode, string> = {
     desktop: '100%',
@@ -296,10 +300,18 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
         </div>
       </div>
 
-      {/* Frame Container */}
-      <div className="flex-1 p-2 sm:p-4 flex flex-col items-center justify-center min-h-0 overflow-hidden relative">
+      {/* Frame Container - ocupa toda a área em Desktop/Padrão */}
+      <div
+        className={`flex-1 flex flex-col items-center justify-center min-h-0 overflow-hidden relative ${
+          device === 'desktop' ? 'p-0' : 'p-2 sm:p-4 bg-[var(--bg)]'
+        }`}
+      >
         <div
-          className="w-full h-full flex flex-col bg-white rounded-xl border border-[var(--border)] shadow-md overflow-hidden transition-all duration-200 relative min-h-[200px]"
+          className={`w-full h-full flex flex-col bg-white overflow-hidden transition-all duration-200 relative ${
+            device === 'desktop'
+              ? 'rounded-none border-0 shadow-none'
+              : 'rounded-xl border border-[var(--border)] shadow-md min-h-[200px]'
+          }`}
           style={{
             width: deviceWidthMap[device],
             maxWidth: '100%',

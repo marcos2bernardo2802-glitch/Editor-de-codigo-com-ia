@@ -809,27 +809,6 @@ export const SidePanel: React.FC<SidePanelProps> = ({
         )}
 
         <div className="flex items-end gap-1.5">
-          {/* Ícone de clipe (anexar imagem): mais discreto, integrado sem borda pesada */}
-          <button
-            id="btnAttachImage"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isGenerating || attachedImages.length >= 3}
-            className={`p-1.5 rounded-md transition-colors cursor-pointer flex items-center justify-center shrink-0 ${
-              attachedImages.length > 0
-                ? 'text-[var(--accent)] bg-[var(--accent)]/15'
-                : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]'
-            } disabled:opacity-40 disabled:cursor-not-allowed`}
-            title={
-              attachedImages.length >= 3
-                ? 'Limite de 3 imagens atingido'
-                : 'Anexar imagem/print (Ctrl+V ou arraste)'
-            }
-            aria-label="Anexar imagem"
-          >
-            <Paperclip className="w-3.5 h-3.5" />
-          </button>
-
           <textarea
             id="instructionInput"
             ref={textareaRef}
@@ -852,42 +831,66 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             className="flex-1 resize-none bg-[var(--panel-2)] border border-[var(--border)] rounded-md text-[var(--text)] px-2.5 py-1.5 text-xs leading-relaxed focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted)]/60 font-sans"
           />
 
-          {/* Botão de envio / parar: apenas ícone com tooltip e aria-label */}
-          {isGenerating ? (
+          {/* Coluna de ações: clipe (acima) e enviar / parar (abaixo) para economizar espaço horizontal */}
+          <div className="flex flex-col items-center gap-1 shrink-0">
+            {/* Ícone de clipe (anexar imagem) */}
             <button
-              id="btnStop"
+              id="btnAttachImage"
               type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onCancelInstruction?.();
-              }}
-              className="p-2 rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 font-semibold transition-all cursor-pointer flex items-center justify-center shadow-xs active:scale-95 shrink-0"
-              title="Parar geração"
-              aria-label="Parar geração"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isGenerating || attachedImages.length >= 3}
+              className={`p-1.5 rounded-md transition-colors cursor-pointer flex items-center justify-center ${
+                attachedImages.length > 0
+                  ? 'text-[var(--accent)] bg-[var(--accent)]/15'
+                  : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]'
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+              title={
+                attachedImages.length >= 3
+                  ? 'Limite de 3 imagens atingido'
+                  : 'Anexar imagem/print (Ctrl+V ou arraste)'
+              }
+              aria-label="Anexar imagem"
             >
-              <div className="relative flex items-center justify-center w-3.5 h-3.5">
-                <Loader2 className="w-3.5 h-3.5 animate-spin absolute inset-0 text-red-400" />
-                <Square className="w-1.5 h-1.5 fill-current text-red-400" />
-              </div>
+              <Paperclip className="w-3.5 h-3.5" />
             </button>
-          ) : (
-            <button
-              id="btnSend"
-              type="button"
-              onClick={onSend}
-              disabled={!instruction.trim() && attachedImages.length === 0}
-              className={`p-2 rounded-md disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-xs transition-all cursor-pointer flex items-center justify-center shadow-xs active:scale-95 shrink-0 ${
-                interactionMode === 'plan'
-                  ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                  : 'bg-[var(--accent)] hover:brightness-105 text-[#1a1206]'
-              }`}
-              title="Enviar comando para a IA (Enter)"
-              aria-label="Enviar"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
-          )}
+
+            {/* Botão de envio / parar */}
+            {isGenerating ? (
+              <button
+                id="btnStop"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onCancelInstruction?.();
+                }}
+                className="p-2 rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 font-semibold transition-all cursor-pointer flex items-center justify-center shadow-xs active:scale-95"
+                title="Parar geração"
+                aria-label="Parar geração"
+              >
+                <div className="relative flex items-center justify-center w-3.5 h-3.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin absolute inset-0 text-red-400" />
+                  <Square className="w-1.5 h-1.5 fill-current text-red-400" />
+                </div>
+              </button>
+            ) : (
+              <button
+                id="btnSend"
+                type="button"
+                onClick={onSend}
+                disabled={!instruction.trim() && attachedImages.length === 0}
+                className={`p-2 rounded-md disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-xs transition-all cursor-pointer flex items-center justify-center shadow-xs active:scale-95 ${
+                  interactionMode === 'plan'
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                    : 'bg-[var(--accent)] hover:brightness-105 text-[#1a1206]'
+                }`}
+                title="Enviar comando para a IA (Enter)"
+                aria-label="Enviar"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </aside>

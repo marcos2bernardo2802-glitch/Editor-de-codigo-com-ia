@@ -1,4 +1,4 @@
-import { SupportedLanguage, ProjectFile } from '../types';
+import { SupportedLanguage, ProjectFile, ThemeMode } from '../types';
 import { normalizeFilePath, extractFileNameFromPath } from './workspace';
 import { resolveJsModuleGraph, getFileDir } from './resolveModules';
 
@@ -82,23 +82,56 @@ export const CONSOLE_INJECT_SCRIPT = `<script id="preview-console-bridge">
 </script>`;
 
 /**
- * Injects the console bridge at the very beginning of the <head> tag
- * so that any script on the page (inline or external) will be captured.
+ * Retorna as regras de estilização da barra de rolagem idênticas à aba Chat do GenIA
  */
-export function injectConsoleBridge(html: string): string {
+export function getCustomScrollbarStyle(theme: ThemeMode = 'dark'): string {
+  const isLight = theme === 'light';
+  const track = isLight ? '#ffffff' : '#1b1e28';
+  const thumb = isLight ? '#e2e8f0' : '#2b2f3d';
+  const thumbHover = isLight ? '#64748b' : '#8c90a3';
+
+  return `<style id="preview-custom-scrollbar">
+  /* Barra de rolagem estilizada idêntica à aba chat */
+  html, body, * {
+    scrollbar-width: thin !important;
+    scrollbar-color: ${thumb} ${track} !important;
+  }
+  ::-webkit-scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+  }
+  ::-webkit-scrollbar-track {
+    background: ${track} !important;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: ${thumb} !important;
+    border-radius: 4px !important;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: ${thumbHover} !important;
+  }
+</style>`;
+}
+
+/**
+ * Injeta o console bridge e a barra de rolagem customizada no cabeçalho <head>
+ */
+export function injectConsoleBridge(html: string, theme: ThemeMode = 'dark'): string {
+  const injectedAssets = `${CONSOLE_INJECT_SCRIPT}\n${getCustomScrollbarStyle(theme)}`;
+
   if (html.includes('<head>')) {
-    return html.replace('<head>', `<head>\n${CONSOLE_INJECT_SCRIPT}`);
+    return html.replace('<head>', `<head>\n${injectedAssets}`);
   }
   if (html.includes('<head ')) {
-    return html.replace(/<head\b([^>]*)>/i, `<head$1>\n${CONSOLE_INJECT_SCRIPT}`);
+    return html.replace(/<head\b([^>]*)>/i, `<head$1>\n${injectedAssets}`);
   }
   if (html.includes('<html>') || html.includes('<html ')) {
-    return html.replace(/<html\b([^>]*)>/i, `<html$1>\n<head>\n${CONSOLE_INJECT_SCRIPT}\n</head>`);
+    return html.replace(/<html\b([^>]*)>/i, `<html$1>\n<head>\n${injectedAssets}\n</head>`);
   }
   if (html.includes('<body>') || html.includes('<body ')) {
-    return html.replace(/<body\b([^>]*)>/i, `<head>\n${CONSOLE_INJECT_SCRIPT}\n</head>\n<body$1>`);
+    return html.replace(/<body\b([^>]*)>/i, `<head>\n${injectedAssets}\n</head>\n<body$1>`);
   }
-  return `<head>\n${CONSOLE_INJECT_SCRIPT}\n</head>\n${html}`;
+  return `<head>\n${injectedAssets}\n</head>\n${html}`;
 }
 
 /**
@@ -279,7 +312,8 @@ export function generatePreviewHtml(
   projectFiles?: ProjectFile[],
   createdBlobUrlsCollector?: string[],
   activeFileId?: string,
-  selectedPreviewFileId?: string
+  selectedPreviewFileId?: string,
+  theme: ThemeMode = 'dark'
 ): string {
   // If multi-file project is active
   if (projectFiles && projectFiles.length > 0) {
@@ -347,7 +381,7 @@ export function generatePreviewHtml(
 
       // Handle completely empty HTML files gracefully
       if (!combinedHtml || !combinedHtml.trim()) {
-        return `<!DOCTYPE html>
+        const emptyHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -398,6 +432,7 @@ export function generatePreviewHtml(
   </div>
 </body>
 </html>`;
+        return injectConsoleBridge(emptyHtml, theme);
       }
 
       const htmlPath = normalizeFilePath(mainHtmlFile.path || mainHtmlFile.name);
@@ -633,7 +668,7 @@ export function generatePreviewHtml(
   ${remainingJsScripts ? `\n${remainingJsScripts}` : ''}
 </body>
 </html>`;
-        return injectConsoleBridge(combinedHtml);
+        return injectConsoleBridge(combinedHtml, theme);
       }
 
       // Inject unlinked CSS into head
@@ -657,7 +692,7 @@ export function generatePreviewHtml(
         }
       }
 
-      return injectConsoleBridge(combinedHtml);
+      return injectConsoleBridge(combinedHtml, theme);
     }
   }
 
@@ -704,7 +739,7 @@ export function generatePreviewHtml(
   </div>
 </body>
 </html>`;
-      return injectConsoleBridge(finalHtml);
+      return injectConsoleBridge(finalHtml, theme);
     }
 
     if (!finalHtml.includes('<html') && !finalHtml.includes('<!DOCTYPE')) {
@@ -723,7 +758,7 @@ export function generatePreviewHtml(
 </html>`;
     }
 
-    return injectConsoleBridge(finalHtml);
+    return injectConsoleBridge(finalHtml, theme);
   }
 
   if (language === 'css') {
@@ -760,7 +795,7 @@ export function generatePreviewHtml(
   </div>
 </body>
 </html>`;
-    return injectConsoleBridge(cssHtml);
+    return injectConsoleBridge(cssHtml, theme);
   }
 
   if (language === 'javascript' || language === 'typescript') {
@@ -815,7 +850,7 @@ export function generatePreviewHtml(
   <\/script>
 </body>
 </html>`;
-    return injectConsoleBridge(jsHtml);
+    return injectConsoleBridge(jsHtml, theme);
   }
 
   if (language === 'markdown') {
@@ -851,7 +886,7 @@ export function generatePreviewHtml(
   <pre style="white-space: pre-wrap; font-family: inherit; background: transparent; color: inherit; padding: 0;">${escaped}</pre>
 </body>
 </html>`;
-    return injectConsoleBridge(mdHtml);
+    return injectConsoleBridge(mdHtml, theme);
   }
 
   if (language === 'json') {
@@ -876,7 +911,7 @@ export function generatePreviewHtml(
   <\/script>
 </body>
 </html>`;
-    return injectConsoleBridge(jsonHtml);
+    return injectConsoleBridge(jsonHtml, theme);
   }
 
   const fallbackHtml = `<!DOCTYPE html>
@@ -892,5 +927,5 @@ export function generatePreviewHtml(
   <pre>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
 </body>
 </html>`;
-  return injectConsoleBridge(fallbackHtml);
+  return injectConsoleBridge(fallbackHtml, theme);
 }

@@ -2533,20 +2533,20 @@ ${effectiveInstruction}`;
               handleResetChatWidth();
             }
           }}
-          className={`hidden md:flex flex-col items-center justify-center w-2 -mx-1 z-20 cursor-col-resize select-none shrink-0 group transition-colors relative ${
-            isDraggingChatWidth ? 'bg-[var(--accent)]/30' : 'hover:bg-[var(--accent)]/20'
+          className={`hidden md:flex flex-col items-center justify-center w-2 z-20 cursor-col-resize select-none shrink-0 group transition-colors relative bg-[var(--panel-2)]/40 hover:bg-[var(--accent)]/25 ${
+            isDraggingChatWidth ? 'bg-[var(--accent)]/35' : ''
           }`}
           title="Arraste para regular o tamanho dos dois campos (Duplo clique para redefinir)"
         >
-          {/* Extended invisible touch/mouse hit area */}
-          <div className="absolute inset-y-0 -left-2 -right-2 z-10" />
+          {/* Hit area contida estritamente dentro da divisória para não sobrepor a barra de rolagem */}
+          <div className="absolute inset-y-0 inset-x-0 z-10" />
 
           {/* Visual Grip Handle */}
           <div
-            className={`w-1 rounded-full transition-all duration-150 ${
+            className={`w-1 rounded-full transition-all duration-150 z-20 ${
               isDraggingChatWidth
                 ? 'h-14 bg-[var(--accent)] shadow-sm'
-                : 'h-8 bg-[var(--muted)]/40 group-hover:h-12 group-hover:bg-[var(--accent)]'
+                : 'h-8 bg-[var(--muted)]/50 group-hover:h-12 group-hover:bg-[var(--accent)]'
             }`}
           />
         </div>
