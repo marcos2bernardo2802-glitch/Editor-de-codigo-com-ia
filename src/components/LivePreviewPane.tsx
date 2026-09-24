@@ -36,7 +36,6 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [showConsole, setShowConsole] = useState<boolean>(false);
   const [logs, setLogs] = useState<PreviewLogItem[]>([]);
-  const [htmlContent, setHtmlContent] = useState<string>('');
   const [selectedPreviewFileId, setSelectedPreviewFileId] = useState<string | null>(null);
   const blobUrlsRef = useRef<string[]>([]);
 
@@ -61,6 +60,25 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
       ? activeFileId
       : (htmlFiles[0]?.id || null);
 
+  // Initialize htmlContent synchronously so the preview is never blank on mount
+  const [htmlContent, setHtmlContent] = useState<string>(() => {
+    try {
+      const initialUrls: string[] = [];
+      const res = generatePreviewHtml(
+        code,
+        language,
+        projectFiles,
+        initialUrls,
+        activeFileId,
+        currentPreviewFileId || undefined
+      );
+      blobUrlsRef.current = initialUrls;
+      return res;
+    } catch {
+      return '';
+    }
+  });
+
   // Regenerates preview HTML, collecting created Blob URLs for ES modules and revoking old ones to prevent memory leaks
   useEffect(() => {
     if (blobUrlsRef.current.length > 0) {
@@ -73,16 +91,20 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
     }
 
     const createdUrls: string[] = [];
-    const html = generatePreviewHtml(
-      code,
-      language,
-      projectFiles,
-      createdUrls,
-      activeFileId,
-      currentPreviewFileId || undefined
-    );
-    blobUrlsRef.current = createdUrls;
-    setHtmlContent(html);
+    try {
+      const html = generatePreviewHtml(
+        code,
+        language,
+        projectFiles,
+        createdUrls,
+        activeFileId,
+        currentPreviewFileId || undefined
+      );
+      blobUrlsRef.current = createdUrls;
+      setHtmlContent(html);
+    } catch (err: any) {
+      console.error('Erro ao gerar preview:', err);
+    }
 
     return () => {
       if (blobUrlsRef.current.length > 0) {
@@ -275,20 +297,22 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
       </div>
 
       {/* Frame Container */}
-      <div className="flex-1 p-3 sm:p-4 flex items-center justify-center overflow-auto min-h-0 relative">
+      <div className="flex-1 p-2 sm:p-4 flex flex-col items-center justify-center min-h-0 overflow-hidden relative">
         <div
-          className="h-full bg-white rounded-xl border border-[var(--border)] shadow-md overflow-hidden transition-all duration-200"
+          className="w-full h-full flex flex-col bg-white rounded-xl border border-[var(--border)] shadow-md overflow-hidden transition-all duration-200 relative min-h-[200px]"
           style={{
             width: deviceWidthMap[device],
             maxWidth: '100%',
+            height: '100%',
+            maxHeight: '100%',
           }}
         >
           <iframe
-            key={refreshKey}
+            key={`preview-${refreshKey}`}
             title="Visualizador de Código"
             srcDoc={htmlContent}
-            sandbox="allow-scripts allow-modals"
-            className="w-full h-full border-0 bg-white"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
+            className="w-full h-full flex-1 border-0 bg-white"
           />
         </div>
       </div>

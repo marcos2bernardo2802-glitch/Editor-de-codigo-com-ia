@@ -18,19 +18,88 @@ export const CONSOLE_INJECT_SCRIPT = `<script id="preview-console-bridge">
       window.parent.postMessage({ type: 'preview_console', level: type, message: msg, timestamp: Date.now() }, '*');
     } catch(e) {}
   }
+
+  function showToast(msg) {
+    try {
+      var toast = document.createElement('div');
+      toast.style.position = 'fixed';
+      toast.style.bottom = '16px';
+      toast.style.left = '50%';
+      toast.style.transform = 'translateX(-50%)';
+      toast.style.backgroundColor = 'rgba(15, 23, 42, 0.92)';
+      toast.style.color = '#f8fafc';
+      toast.style.padding = '8px 16px';
+      toast.style.borderRadius = '8px';
+      toast.style.boxShadow = '0 4px 14px rgba(0,0,0,0.3)';
+      toast.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      toast.style.fontSize = '12px';
+      toast.style.fontWeight = '500';
+      toast.style.zIndex = '999999';
+      toast.style.pointerEvents = 'none';
+      toast.style.transition = 'opacity 0.25s ease';
+      toast.textContent = msg;
+      if (document.body) {
+        document.body.appendChild(toast);
+        setTimeout(function() {
+          toast.style.opacity = '0';
+          setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 250);
+        }, 2500);
+      }
+    } catch(e) {}
+  }
+
   var oldLog = console.log;
   var oldErr = console.error;
   var oldWarn = console.warn;
   var oldInfo = console.info;
-  console.log = function() { send('log', arguments); if(oldLog) oldLog.apply(console, arguments); };
-  console.error = function() { send('error', arguments); if(oldErr) oldErr.apply(console, arguments); };
-  console.warn = function() { send('warn', arguments); if(oldWarn) oldWarn.apply(console, arguments); };
-  console.info = function() { send('info', arguments); if(oldInfo) oldInfo.apply(console, arguments); };
+
+  console.log = function() { send('log', arguments); if(oldLog) try { oldLog.apply(console, arguments); } catch(e){} };
+  console.error = function() { send('error', arguments); if(oldErr) try { oldErr.apply(console, arguments); } catch(e){} };
+  console.warn = function() { send('warn', arguments); if(oldWarn) try { oldWarn.apply(console, arguments); } catch(e){} };
+  console.info = function() { send('info', arguments); if(oldInfo) try { oldInfo.apply(console, arguments); } catch(e){} };
+
+  window.alert = function(msg) {
+    send('info', ['[Alerta]: ' + msg]);
+    showToast('[Alerta]: ' + msg);
+  };
+  window.confirm = function(msg) {
+    send('info', ['[Confirmar]: ' + msg]);
+    return true;
+  };
+  window.prompt = function(msg, def) {
+    send('info', ['[Prompt]: ' + msg]);
+    return def || '';
+  };
+
   window.addEventListener('error', function(e) {
-    send('error', [e.message || 'Erro de execução']);
+    send('error', [e.message || 'Erro de execução na prévia']);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = e.reason ? (e.reason.message || String(e.reason)) : 'Promise rejeitada';
+    send('error', ['Promise rejeitada: ' + reason]);
   });
 })();
 </script>`;
+
+/**
+ * Injects the console bridge at the very beginning of the <head> tag
+ * so that any script on the page (inline or external) will be captured.
+ */
+export function injectConsoleBridge(html: string): string {
+  if (html.includes('<head>')) {
+    return html.replace('<head>', `<head>\n${CONSOLE_INJECT_SCRIPT}`);
+  }
+  if (html.includes('<head ')) {
+    return html.replace(/<head\b([^>]*)>/i, `<head$1>\n${CONSOLE_INJECT_SCRIPT}`);
+  }
+  if (html.includes('<html>') || html.includes('<html ')) {
+    return html.replace(/<html\b([^>]*)>/i, `<html$1>\n<head>\n${CONSOLE_INJECT_SCRIPT}\n</head>`);
+  }
+  if (html.includes('<body>') || html.includes('<body ')) {
+    return html.replace(/<body\b([^>]*)>/i, `<head>\n${CONSOLE_INJECT_SCRIPT}\n</head>\n<body$1>`);
+  }
+  return `<head>\n${CONSOLE_INJECT_SCRIPT}\n</head>\n${html}`;
+}
 
 /**
  * Resolves a relative path against a base file directory.
@@ -61,7 +130,9 @@ export function findMatchingFile(
   projectFiles: ProjectFile[],
   targetPath: string
 ): ProjectFile | undefined {
-  const normTarget = normalizeFilePath(targetPath).toLowerCase();
+  if (!projectFiles || projectFiles.length === 0 || !targetPath) return undefined;
+  const cleanTarget = targetPath.split('?')[0].split('#')[0].trim();
+  const normTarget = normalizeFilePath(cleanTarget).toLowerCase();
   const targetFileName = extractFileNameFromPath(normTarget).toLowerCase();
 
   // 1. Exact path match
@@ -80,7 +151,22 @@ export function findMatchingFile(
   found = projectFiles.find(
     (f) => extractFileNameFromPath(f.path || f.name).toLowerCase() === targetFileName
   );
-  return found;
+  if (found) return found;
+
+  // 4. Fuzzy fallback (e.g. "styles.css" vs "style.css")
+  const baseNameNoExt = targetFileName.replace(/\.[^/.]+$/, '');
+  const ext = targetFileName.includes('.') ? targetFileName.slice(targetFileName.lastIndexOf('.')) : '';
+  if (ext) {
+    found = projectFiles.find((f) => {
+      const fName = extractFileNameFromPath(f.path || f.name).toLowerCase();
+      if (!fName.endsWith(ext)) return false;
+      const fBase = fName.slice(0, fName.length - ext.length);
+      return fBase === baseNameNoExt || fBase.startsWith(baseNameNoExt) || baseNameNoExt.startsWith(fBase);
+    });
+    if (found) return found;
+  }
+
+  return undefined;
 }
 
 export function isExternalUrl(url: string): boolean {
@@ -103,6 +189,7 @@ export function resolveCssImports(
   visited: Set<string> = new Set(),
   embeddedFileIds?: Set<string>
 ): string {
+  if (!cssContent) return '';
   const currentDir = getFileDir(currentFilePath);
   const currentNorm = normalizeFilePath(currentFilePath).toLowerCase();
   visited.add(currentNorm);
@@ -136,7 +223,7 @@ export function resolveCssImports(
 
     // Recursively resolve any chained @import in the target file
     const resolvedNestedCss = resolveCssImports(
-      matchedFile.content,
+      matchedFile.content || '',
       matchedFile.path || matchedFile.name,
       allFiles,
       visited,
@@ -155,7 +242,8 @@ export function resolveCssImports(
 /**
  * Checks if a project file is a real HTML document or webpage
  */
-export function isRealHtmlFile(f: { path?: string; name: string; content?: string }): boolean {
+export function isRealHtmlFile(f?: { path?: string; name?: string; content?: string } | null): boolean {
+  if (!f) return false;
   const normName = (f.path || f.name || '').toLowerCase();
   if (normName.endsWith('.html') || normName.endsWith('.htm')) return true;
   if (!f.content) return false;
@@ -438,27 +526,34 @@ export function generatePreviewHtml(
         }
       );
 
-      // 4. Auto-inject companion CSS only if relevant:
-      // - Same base name as main HTML (e.g. divisorinteligente.css for divisorinteligente.html)
-      // - OR project has only 1 CSS file and HTML has no linked stylesheets
+      // 4. Auto-inject companion & shared CSS files:
+      // - CSS files with the same base name as the HTML file (e.g. divisor.css for divisor.html)
+      // - Generic / shared CSS files (e.g. style.css, reset.css, global.css)
+      // - Exclude only CSS files that explicitly belong to a DIFFERENT HTML file in the project
       const mainBaseName = mainHtmlFile.name.replace(/\.[^/.]+$/, '').toLowerCase();
-      const hasExplicitCss = /<link\b[^>]*\brel=["']?stylesheet["']?/i.test(combinedHtml);
       const allCssFiles = projectFiles.filter(
         (f) => f.language === 'css' || f.name.toLowerCase().endsWith('.css')
       );
 
-      const relevantUnlinkedCss = allCssFiles.filter((f) => {
+      const unlinkedCssFiles = allCssFiles.filter((f) => {
         if (embeddedFileIds.has(f.id)) return false;
         const fBaseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
         if (fBaseName === mainBaseName) return true;
-        if (!hasExplicitCss && allCssFiles.length === 1) return true;
-        return false;
+        // Check if this CSS file is a companion for another HTML file in the workspace
+        const belongsToOtherHtml = projectFiles.some(
+          (other) =>
+            other.id !== mainHtmlFile.id &&
+            isRealHtmlFile(other) &&
+            other.name.replace(/\.[^/.]+$/, '').toLowerCase() === fBaseName
+        );
+        if (belongsToOtherHtml) return false;
+        return true;
       });
 
-      const remainingCss = relevantUnlinkedCss
+      const remainingCss = unlinkedCssFiles
         .map((f) => {
           embeddedFileIds.add(f.id);
-          const rawCssContent = activeFileId && f.id === activeFileId ? code : f.content;
+          const rawCssContent = activeFileId && f.id === activeFileId ? code : (f.content || '');
           const resolved = resolveCssImports(
             rawCssContent,
             f.path || f.name,
@@ -466,14 +561,14 @@ export function generatePreviewHtml(
             new Set(),
             embeddedFileIds
           );
-          return `/* Auto-injetado de: ${f.path || f.name} */\n${resolved}`;
+          return `/* Injetado de: ${f.path || f.name} */\n${resolved}`;
         })
         .join('\n\n');
 
-      // 5. Auto-inject companion JS only if relevant:
-      // - Same base name as main HTML (e.g. portal.js for portal.html)
-      // - OR project has only 1 JS file and HTML has no <script> tags
-      const hasExplicitScripts = /<script\b/i.test(combinedHtml);
+      // 5. Auto-inject companion & shared JS files:
+      // - JS files with the same base name as the HTML file (e.g. portal.js for portal.html)
+      // - Generic / shared JS files (e.g. script.js, app.js, main.js)
+      // - Exclude only JS files that explicitly belong to a DIFFERENT HTML file in the project
       const allJsFiles = projectFiles.filter(
         (f) =>
           (f.language === 'javascript' ||
@@ -483,20 +578,31 @@ export function generatePreviewHtml(
           !f.name.toLowerCase().endsWith('.py')
       );
 
-      const relevantUnlinkedJs = allJsFiles.filter((f) => {
+      const unlinkedJsFiles = allJsFiles.filter((f) => {
         if (embeddedFileIds.has(f.id)) return false;
         const fBaseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
         if (fBaseName === mainBaseName) return true;
-        if (!hasExplicitScripts && allJsFiles.length === 1) return true;
-        return false;
+        // Check if this JS file is a companion for another HTML file in the workspace
+        const belongsToOtherHtml = projectFiles.some(
+          (other) =>
+            other.id !== mainHtmlFile.id &&
+            isRealHtmlFile(other) &&
+            other.name.replace(/\.[^/.]+$/, '').toLowerCase() === fBaseName
+        );
+        if (belongsToOtherHtml) return false;
+        return true;
       });
 
-      const remainingJsScripts = relevantUnlinkedJs
+      const remainingJsScripts = unlinkedJsFiles
         .map((f) => {
           embeddedFileIds.add(f.id);
-          const scriptContent = activeFileId && f.id === activeFileId ? code : f.content;
-          const usesModules = /\b(import\s+|export\s+)/.test(scriptContent);
-          if (usesModules) {
+          const scriptContent = activeFileId && f.id === activeFileId ? code : (f.content || '');
+          // Detect actual ES module imports/exports (not just comments or word occurrences)
+          const hasRealModuleSyntax = /(?:^|[;\s])(?:import\s+(?:(?:\*|[\w{}\s,]+)\s+from\s+)?['"][^'"]+['"]|export\s+(?:default\s+|const\s+|let\s+|var\s+|function\s+|class\s+|{[\w\s,]+}))/m.test(
+            scriptContent
+          );
+
+          if (hasRealModuleSyntax) {
             const virtualScriptFile = { ...f, content: scriptContent };
             const { entryBlobUrl, createdBlobUrls, resolvedFileIds } = resolveJsModuleGraph(
               virtualScriptFile,
@@ -508,7 +614,7 @@ export function generatePreviewHtml(
             resolvedFileIds.forEach((id) => embeddedFileIds.add(id));
             return `<script type="module" src="${entryBlobUrl}" data-source="${f.path || f.name}"></script>`;
           }
-          return `<script data-source="${f.path || f.name}">\n// Auto-injetado de: ${f.path || f.name}\ntry {\n${scriptContent}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}\n<\/script>`;
+          return `<script data-source="${f.path || f.name}">\n// Injetado de: ${f.path || f.name}\ntry {\n${scriptContent}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}\n<\/script>`;
         })
         .join('\n');
 
@@ -520,45 +626,88 @@ export function generatePreviewHtml(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${mainHtmlFile.name}</title>
-  ${remainingCss ? `<style id="project-unlinked-styles">\n${remainingCss}\n</style>` : ''}
+  ${remainingCss ? `\n<style id="project-unlinked-styles">\n${remainingCss}\n</style>` : ''}
 </head>
 <body>
   ${combinedHtml}
-  ${CONSOLE_INJECT_SCRIPT}
   ${remainingJsScripts ? `\n${remainingJsScripts}` : ''}
 </body>
 </html>`;
-        return combinedHtml;
+        return injectConsoleBridge(combinedHtml);
       }
 
       // Inject unlinked CSS into head
       if (remainingCss) {
+        const styleTag = `<style id="project-unlinked-styles">\n${remainingCss}\n</style>`;
         if (combinedHtml.includes('</head>')) {
-          combinedHtml = combinedHtml.replace(
-            '</head>',
-            `<style id="project-unlinked-styles">\n${remainingCss}\n</style>\n</head>`
-          );
+          combinedHtml = combinedHtml.replace('</head>', `${styleTag}\n</head>`);
+        } else if (combinedHtml.includes('<body')) {
+          combinedHtml = combinedHtml.replace(/<body\b/i, `${styleTag}\n<body`);
         } else {
-          combinedHtml = `<style id="project-unlinked-styles">\n${remainingCss}\n</style>\n` + combinedHtml;
+          combinedHtml = `${styleTag}\n${combinedHtml}`;
         }
       }
 
-      // Inject console bridge & unlinked JS before body close
-      const scriptInjection = `${CONSOLE_INJECT_SCRIPT}\n${remainingJsScripts}`;
-      if (combinedHtml.includes('</body>')) {
-        combinedHtml = combinedHtml.replace('</body>', `${scriptInjection}\n</body>`);
-      } else {
-        combinedHtml = combinedHtml + `\n${scriptInjection}`;
+      // Inject unlinked JS before body close
+      if (remainingJsScripts) {
+        if (combinedHtml.includes('</body>')) {
+          combinedHtml = combinedHtml.replace('</body>', `${remainingJsScripts}\n</body>`);
+        } else {
+          combinedHtml = combinedHtml + `\n${remainingJsScripts}`;
+        }
       }
 
-      return combinedHtml;
+      return injectConsoleBridge(combinedHtml);
     }
   }
 
   // Fallback for single file rendering
   if (language === 'html') {
     let finalHtml = code;
-    if (!code.includes('<html') && !code.includes('<!DOCTYPE')) {
+    if (!finalHtml || !finalHtml.trim()) {
+      finalHtml = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Novo Documento HTML</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #0f172a;
+      color: #94a3b8;
+      text-align: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .box {
+      padding: 32px 24px;
+      border: 1px dashed #334155;
+      border-radius: 12px;
+      background: #1e293b;
+      max-width: 440px;
+      width: 100%;
+    }
+    h3 { margin-top: 0; color: #f8fafc; font-size: 16px; font-weight: 600; }
+    p { font-size: 13px; line-height: 1.5; margin-bottom: 0; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h3>Documento HTML Vazio</h3>
+    <p>Digite ou cole seu código HTML no editor à esquerda para ver o resultado em tempo real.</p>
+  </div>
+</body>
+</html>`;
+      return injectConsoleBridge(finalHtml);
+    }
+
+    if (!finalHtml.includes('<html') && !finalHtml.includes('<!DOCTYPE')) {
       finalHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -569,19 +718,16 @@ export function generatePreviewHtml(
   </style>
 </head>
 <body>
-  ${code}
+  ${finalHtml}
 </body>
 </html>`;
     }
 
-    if (finalHtml.includes('</body>')) {
-      return finalHtml.replace('</body>', `${CONSOLE_INJECT_SCRIPT}\n</body>`);
-    }
-    return finalHtml + `\n${CONSOLE_INJECT_SCRIPT}`;
+    return injectConsoleBridge(finalHtml);
   }
 
   if (language === 'css') {
-    return `<!DOCTYPE html>
+    const cssHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -614,10 +760,11 @@ export function generatePreviewHtml(
   </div>
 </body>
 </html>`;
+    return injectConsoleBridge(cssHtml);
   }
 
   if (language === 'javascript' || language === 'typescript') {
-    return `<!DOCTYPE html>
+    const jsHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -668,6 +815,7 @@ export function generatePreviewHtml(
   <\/script>
 </body>
 </html>`;
+    return injectConsoleBridge(jsHtml);
   }
 
   if (language === 'markdown') {
@@ -677,7 +825,7 @@ export function generatePreviewHtml(
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    return `<!DOCTYPE html>
+    const mdHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -703,10 +851,11 @@ export function generatePreviewHtml(
   <pre style="white-space: pre-wrap; font-family: inherit; background: transparent; color: inherit; padding: 0;">${escaped}</pre>
 </body>
 </html>`;
+    return injectConsoleBridge(mdHtml);
   }
 
   if (language === 'json') {
-    return `<!DOCTYPE html>
+    const jsonHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -727,9 +876,10 @@ export function generatePreviewHtml(
   <\/script>
 </body>
 </html>`;
+    return injectConsoleBridge(jsonHtml);
   }
 
-  return `<!DOCTYPE html>
+  const fallbackHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -742,4 +892,5 @@ export function generatePreviewHtml(
   <pre>${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
 </body>
 </html>`;
+  return injectConsoleBridge(fallbackHtml);
 }

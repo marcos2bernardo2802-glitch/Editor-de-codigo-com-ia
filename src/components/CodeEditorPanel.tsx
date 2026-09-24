@@ -475,12 +475,14 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
           )}
 
           {/* Editor & Preview Split Container */}
-          <div className="flex-1 flex flex-col md:flex-row min-h-0 relative">
+          <div className="flex-1 flex flex-col md:flex-row min-h-0 relative overflow-hidden">
             {/* Code Editor (rendered in 'code' or 'split' modes) */}
             {(viewMode === 'code' || viewMode === 'split') && (
               <div
-                className={`h-full flex flex-col min-h-0 ${
-                  viewMode === 'split' ? 'w-full md:w-1/2 border-b md:border-b-0 md:border-r border-[var(--border)]' : 'w-full'
+                className={`flex flex-col min-h-0 overflow-hidden ${
+                  viewMode === 'split'
+                    ? 'w-full h-1/2 md:h-full md:w-1/2 border-b md:border-b-0 md:border-r border-[var(--border)]'
+                    : 'w-full h-full'
                 }`}
                 style={{ fontSize: `${fontSize}px` }}
               >
@@ -562,8 +564,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
             {/* Live Preview Pane (rendered in 'preview' or 'split' modes) */}
             {(viewMode === 'preview' || viewMode === 'split') && (
               <div
-                className={`h-full overflow-hidden ${
-                  viewMode === 'split' ? 'w-full md:w-1/2' : 'w-full'
+                className={`flex flex-col min-h-0 overflow-hidden ${
+                  viewMode === 'split' ? 'w-full h-1/2 md:h-full md:w-1/2' : 'w-full h-full'
                 }`}
               >
                 <LivePreviewPane

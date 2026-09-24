@@ -51,8 +51,14 @@ export const CODE_TEMPLATES: CodeTemplate[] = [
     <button class="btn-buy" id="btnBuy">Comprar Agora - R$ 299</button>
   </div>
   <script>
-    document.getElementById('btnBuy').addEventListener('click', () => {
-      alert('Produto adicionado ao carrinho!');
+    const btn = document.getElementById('btnBuy');
+    let bought = false;
+    btn.addEventListener('click', () => {
+      bought = !bought;
+      btn.textContent = bought ? '✓ Adicionado ao Carrinho!' : 'Comprar Agora - R$ 299';
+      btn.style.background = bought ? '#10b981' : '#3b82f6';
+      alert('Produto adicionado ao carrinho com sucesso!');
+      console.log('Status da compra atualizado. Item no carrinho:', bought);
     });
   </script>
 </body>
