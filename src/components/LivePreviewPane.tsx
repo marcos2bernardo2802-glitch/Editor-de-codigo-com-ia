@@ -10,25 +10,56 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
+  FileCode,
 } from 'lucide-react';
 import { SupportedLanguage, ProjectFile, PreviewLogItem } from '../types';
-import { generatePreviewHtml } from '../utils/preview';
+import { generatePreviewHtml, getAvailableHtmlFiles, isRealHtmlFile } from '../utils/preview';
 
 interface LivePreviewPaneProps {
   code: string;
   language: SupportedLanguage;
   projectFiles?: ProjectFile[];
+  activeFileId?: string;
+  onSelectFile?: (id: string) => void;
 }
 
 type DeviceMode = 'desktop' | 'tablet' | 'mobile';
 
-export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({ code, language, projectFiles }) => {
+export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
+  code,
+  language,
+  projectFiles,
+  activeFileId,
+  onSelectFile,
+}) => {
   const [device, setDevice] = useState<DeviceMode>('desktop');
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [showConsole, setShowConsole] = useState<boolean>(false);
   const [logs, setLogs] = useState<PreviewLogItem[]>([]);
   const [htmlContent, setHtmlContent] = useState<string>('');
+  const [selectedPreviewFileId, setSelectedPreviewFileId] = useState<string | null>(null);
   const blobUrlsRef = useRef<string[]>([]);
+
+  // Find all previewable HTML files in workspace
+  const htmlFiles = getAvailableHtmlFiles(projectFiles);
+
+  // When activeFileId changes in the editor, if it's a real HTML file, update preview selection
+  useEffect(() => {
+    if (activeFileId && projectFiles && projectFiles.length > 0) {
+      const activeFile = projectFiles.find((f) => f.id === activeFileId);
+      if (activeFile && isRealHtmlFile(activeFile)) {
+        setSelectedPreviewFileId(activeFile.id);
+      }
+    }
+  }, [activeFileId, projectFiles]);
+
+  // Determine current preview file id
+  const currentPreviewFileId =
+    selectedPreviewFileId && htmlFiles.some((f) => f.id === selectedPreviewFileId)
+      ? selectedPreviewFileId
+      : (activeFileId && htmlFiles.some((f) => f.id === activeFileId))
+      ? activeFileId
+      : (htmlFiles[0]?.id || null);
 
   // Regenerates preview HTML, collecting created Blob URLs for ES modules and revoking old ones to prevent memory leaks
   useEffect(() => {
@@ -42,7 +73,14 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({ code, language
     }
 
     const createdUrls: string[] = [];
-    const html = generatePreviewHtml(code, language, projectFiles, createdUrls);
+    const html = generatePreviewHtml(
+      code,
+      language,
+      projectFiles,
+      createdUrls,
+      activeFileId,
+      currentPreviewFileId || undefined
+    );
     blobUrlsRef.current = createdUrls;
     setHtmlContent(html);
 
@@ -56,7 +94,7 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({ code, language
         blobUrlsRef.current = [];
       }
     };
-  }, [code, language, projectFiles, refreshKey]);
+  }, [code, language, projectFiles, activeFileId, currentPreviewFileId, refreshKey]);
 
   const deviceWidthMap: Record<DeviceMode, string> = {
     desktop: '100%',
@@ -98,19 +136,60 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({ code, language
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--bg)]">
       {/* Sub-toolbar for preview options */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none text-xs">
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wider">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <span className="flex items-center gap-1 text-[11px] font-semibold text-[var(--muted)] uppercase tracking-wider shrink-0">
             <Sparkles className="w-3 h-3 text-[var(--accent)]" />
             Visualização em tempo real
           </span>
           {isMultiFileProject ? (
-            <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-[var(--accent)]/15 border border-[var(--accent)]/30 text-[var(--accent)]">
+            <span className="hidden sm:flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-[var(--accent)]/15 border border-[var(--accent)]/30 text-[var(--accent)] shrink-0">
               <FolderTree className="w-3 h-3" />
-              Projeto Integrado ({projectFiles?.length} arquivos)
+              Projeto ({projectFiles?.length} arquivos)
             </span>
           ) : (
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--panel-2)] border border-[var(--border)] text-[var(--muted)] uppercase">
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--panel-2)] border border-[var(--border)] text-[var(--muted)] uppercase shrink-0">
               {language}
+            </span>
+          )}
+
+          {/* Selector for which HTML file to view in a multi-file project */}
+          {isMultiFileProject && htmlFiles.length > 1 && (
+            <div className="flex items-center gap-1 bg-[var(--panel-2)] border border-[var(--border)] rounded-md px-1.5 py-0.5 max-w-[200px] sm:max-w-[260px]">
+              <FileCode className="w-3 h-3 text-[var(--accent)] shrink-0" />
+              <select
+                id="previewFileSelector"
+                value={currentPreviewFileId || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedPreviewFileId(val);
+                  if (onSelectFile && val) {
+                    onSelectFile(val);
+                  }
+                }}
+                className="text-[11px] font-mono bg-transparent text-[var(--text)] focus:outline-none cursor-pointer truncate w-full"
+                title="Alternar arquivo HTML visualizado"
+              >
+                {htmlFiles.map((f) => (
+                  <option key={f.id} value={f.id} className="bg-[var(--panel)] text-[var(--text)]">
+                    {f.path || f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* If there is exactly 1 HTML file, show its name badge */}
+          {isMultiFileProject && htmlFiles.length === 1 && (
+            <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--panel-2)] border border-[var(--border)] text-[var(--text)] truncate max-w-[180px]">
+              <FileCode className="w-3 h-3 text-[var(--accent)] shrink-0" />
+              {htmlFiles[0].name}
+            </span>
+          )}
+
+          {/* If there are no HTML files in project, show info badge */}
+          {isMultiFileProject && htmlFiles.length === 0 && (
+            <span className="text-[10px] text-[var(--muted)] italic truncate max-w-[200px]">
+              Prévia: {projectFiles?.find((f) => f.id === activeFileId)?.name || 'Arquivo ativo'}
             </span>
           )}
         </div>

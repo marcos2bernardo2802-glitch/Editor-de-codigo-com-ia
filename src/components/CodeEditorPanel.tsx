@@ -570,6 +570,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
                   code={code}
                   language={language}
                   projectFiles={workspaceMode === 'project' ? files : undefined}
+                  activeFileId={activeFileId}
+                  onSelectFile={onSelectFile}
                 />
               </div>
             )}

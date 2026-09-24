@@ -16,7 +16,8 @@ export function extractFileNameFromPath(fullPath: string): string {
 }
 
 export function detectLanguageFromName(filename: string): SupportedLanguage {
-  const ext = filename.split('.').pop()?.toLowerCase();
+  const parts = filename.split('.');
+  const ext = parts.length > 1 ? parts.pop()?.toLowerCase() : '';
   switch (ext) {
     case 'html':
     case 'htm':
@@ -26,19 +27,33 @@ export function detectLanguageFromName(filename: string): SupportedLanguage {
     case 'js':
     case 'jsx':
     case 'mjs':
+    case 'cjs':
       return 'javascript';
     case 'ts':
     case 'tsx':
       return 'typescript';
     case 'py':
+    case 'pyw':
       return 'python';
     case 'json':
       return 'json';
     case 'md':
     case 'markdown':
+    case 'yaml':
+    case 'yml':
+    case 'toml':
+    case 'ini':
+    case 'env':
+    case 'txt':
+    case 'sh':
+    case 'bash':
+    case 'sql':
+    case 'log':
+    case 'gitignore':
+    case 'continueignore':
       return 'markdown';
     default:
-      return 'html';
+      return 'markdown';
   }
 }
 

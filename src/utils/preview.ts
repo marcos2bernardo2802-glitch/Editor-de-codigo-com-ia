@@ -153,30 +153,165 @@ export function resolveCssImports(
 }
 
 /**
+ * Checks if a project file is a real HTML document or webpage
+ */
+export function isRealHtmlFile(f: { path?: string; name: string; content?: string }): boolean {
+  const normName = (f.path || f.name || '').toLowerCase();
+  if (normName.endsWith('.html') || normName.endsWith('.htm')) return true;
+  if (!f.content) return false;
+  const trimmed = f.content.trim().toLowerCase();
+  return (
+    trimmed.startsWith('<!doctype html') ||
+    trimmed.startsWith('<html') ||
+    (trimmed.includes('<body') && trimmed.includes('</body>'))
+  );
+}
+
+/**
+ * Returns all previewable HTML files in the project workspace
+ */
+export function getAvailableHtmlFiles(projectFiles?: ProjectFile[]): ProjectFile[] {
+  if (!projectFiles || projectFiles.length === 0) return [];
+  return projectFiles.filter(isRealHtmlFile);
+}
+
+/**
  * Generates the preview HTML for the iframe.
  * Supports:
  * - Multi-file linking (<link rel="stylesheet">, <script src="...">)
  * - ES modules (<script type="module" src="...">) via Blob URLs
  * - Recursive CSS @import resolution
  * - Collection of created Blob URLs for cleanup
+ * - Smart HTML file detection and switching across multi-file projects
+ * - Clean CSS/JS isolation to avoid cross-page style breakage
  */
 export function generatePreviewHtml(
   code: string,
   language: SupportedLanguage,
   projectFiles?: ProjectFile[],
-  createdBlobUrlsCollector?: string[]
+  createdBlobUrlsCollector?: string[],
+  activeFileId?: string,
+  selectedPreviewFileId?: string
 ): string {
   // If multi-file project is active
   if (projectFiles && projectFiles.length > 0) {
-    // 1. Find main HTML file (index.html, or first .html file, or active file if html)
-    const mainHtmlFile =
-      projectFiles.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
-      projectFiles.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
-      projectFiles.find((f) => f.language === 'html' || f.name.endsWith('.html')) ||
-      (language === 'html' ? { content: code, name: 'index.html', path: 'index.html', language: 'html' as SupportedLanguage, id: 'temp' } : null);
+    const activeFile = activeFileId ? projectFiles.find((f) => f.id === activeFileId) : undefined;
+    const activeFileBaseName = activeFile
+      ? activeFile.name.replace(/\.[^/.]+$/, '').toLowerCase()
+      : '';
+
+    // Determine the main HTML file to render:
+    // 1. User explicitly selected an HTML file from the preview selector
+    // 2. Active file if it's an HTML file
+    // 3. Sibling HTML file matching the active file's base name (e.g. portal.css -> portal.html)
+    // 4. index.html or */index.html
+    // 5. First real HTML file found in project
+    // 6. If code itself contains HTML tags or language === 'html'
+    let mainHtmlFile: ProjectFile | null = null;
+
+    if (selectedPreviewFileId) {
+      mainHtmlFile = projectFiles.find((f) => f.id === selectedPreviewFileId) || null;
+    }
+
+    if (!mainHtmlFile && activeFile && isRealHtmlFile(activeFile)) {
+      mainHtmlFile = activeFile;
+    }
+
+    if (!mainHtmlFile && activeFileBaseName) {
+      mainHtmlFile =
+        projectFiles.find(
+          (f) =>
+            isRealHtmlFile(f) &&
+            f.name.replace(/\.[^/.]+$/, '').toLowerCase() === activeFileBaseName
+        ) || null;
+    }
+
+    if (!mainHtmlFile) {
+      mainHtmlFile =
+        projectFiles.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
+        projectFiles.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
+        projectFiles.find((f) => isRealHtmlFile(f)) ||
+        null;
+    }
+
+    // Fallback if active editor has HTML code
+    if (
+      !mainHtmlFile &&
+      (language === 'html' ||
+        code.trim().toLowerCase().startsWith('<!doctype html') ||
+        code.trim().toLowerCase().startsWith('<html'))
+    ) {
+      mainHtmlFile = {
+        id: 'virtual-active-html',
+        name: activeFile ? activeFile.name : 'index.html',
+        path: activeFile ? activeFile.path : 'index.html',
+        language: 'html' as SupportedLanguage,
+        content: code,
+        history: [],
+        historyIndex: 0,
+      };
+    }
 
     if (mainHtmlFile) {
-      let combinedHtml = mainHtmlFile.content;
+      // If the mainHtmlFile is currently active in the editor, use live buffer `code`
+      let combinedHtml =
+        activeFileId && mainHtmlFile.id === activeFileId ? code : mainHtmlFile.content;
+
+      // Handle completely empty HTML files gracefully
+      if (!combinedHtml || !combinedHtml.trim()) {
+        return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arquivo Vazio</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #0d1117;
+      color: #8b949e;
+      text-align: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .box {
+      padding: 32px 24px;
+      border: 1px dashed #30363d;
+      border-radius: 12px;
+      background: #161b22;
+      max-width: 440px;
+      width: 100%;
+    }
+    h3 { margin-top: 0; color: #f0f6fc; font-size: 16px; font-weight: 600; }
+    p { font-size: 13px; line-height: 1.5; margin-bottom: 0; }
+    .badge {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 3px 10px;
+      background: #1f6feb20;
+      color: #58a6ff;
+      border: 1px solid #1f6feb40;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h3>Arquivo HTML Sem Conteúdo</h3>
+    <p>O arquivo selecionado está vazio ou não possui elementos no corpo.</p>
+    <div class="badge">${mainHtmlFile.path || mainHtmlFile.name}</div>
+  </div>
+</body>
+</html>`;
+      }
+
       const htmlPath = normalizeFilePath(mainHtmlFile.path || mainHtmlFile.name);
       const htmlDir = htmlPath.includes('/') ? htmlPath.slice(0, htmlPath.lastIndexOf('/')) : '';
 
@@ -184,6 +319,22 @@ export function generatePreviewHtml(
       if (mainHtmlFile.id) {
         embeddedFileIds.add(mainHtmlFile.id);
       }
+
+      // Resolve local images (e.g. <img src="logo.svg">)
+      combinedHtml = combinedHtml.replace(/<img\b([^>]*?)>/gi, (imgMatch, attrs) => {
+        const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+        if (!srcMatch) return imgMatch;
+        const src = srcMatch[1];
+        if (isExternalUrl(src)) return imgMatch;
+
+        const resolvedPath = resolveRelativePath(htmlDir, src);
+        const matchedImg = findMatchingFile(projectFiles, resolvedPath);
+        if (matchedImg && (matchedImg.name.endsWith('.svg') || matchedImg.path?.endsWith('.svg'))) {
+          const svgData = `data:image/svg+xml;utf8,${encodeURIComponent(matchedImg.content)}`;
+          return imgMatch.replace(srcMatch[0], `src="${svgData}"`);
+        }
+        return imgMatch;
+      });
 
       // 2. Intercept <link rel="stylesheet" href="..."> tags & resolve recursive @import
       combinedHtml = combinedHtml.replace(/<link\b([^>]*?)>/gi, (match, attrs) => {
@@ -203,8 +354,10 @@ export function generatePreviewHtml(
 
         if (matchedFile) {
           embeddedFileIds.add(matchedFile.id);
+          const rawCssContent =
+            activeFileId && matchedFile.id === activeFileId ? code : matchedFile.content;
           const resolvedCss = resolveCssImports(
-            matchedFile.content,
+            rawCssContent,
             matchedFile.path || matchedFile.name,
             projectFiles,
             new Set(),
@@ -234,11 +387,14 @@ export function generatePreviewHtml(
 
             if (matchedFile) {
               embeddedFileIds.add(matchedFile.id);
+              const scriptContent =
+                activeFileId && matchedFile.id === activeFileId ? code : matchedFile.content;
 
               if (isModule) {
                 // ES Module script: generate Blob URL graph
+                const virtualScriptFile = { ...matchedFile, content: scriptContent };
                 const { entryBlobUrl, createdBlobUrls, resolvedFileIds } = resolveJsModuleGraph(
-                  matchedFile,
+                  virtualScriptFile,
                   projectFiles
                 );
                 if (createdBlobUrlsCollector) {
@@ -249,7 +405,7 @@ export function generatePreviewHtml(
                 return `<script type="module" src="${entryBlobUrl}" data-source="${matchedFile.path || matchedFile.name}"></script>`;
               } else {
                 // Classic script: inline as text
-                return `<script data-source="${matchedFile.path || matchedFile.name}">\n// Injetado de: ${matchedFile.path || matchedFile.name}\ntry {\n${matchedFile.content}\n} catch(err) {\n  console.error('[Script Error ${matchedFile.path || matchedFile.name}]:', err);\n}\n<\/script>`;
+                return `<script data-source="${matchedFile.path || matchedFile.name}">\n// Injetado de: ${matchedFile.path || matchedFile.name}\ntry {\n${scriptContent}\n} catch(err) {\n  console.error('[Script Error ${matchedFile.path || matchedFile.name}]:', err);\n}\n<\/script>`;
               }
             }
 
@@ -282,37 +438,68 @@ export function generatePreviewHtml(
         }
       );
 
-      // 4. Bundle any remaining CSS files that weren't explicitly linked in the HTML
-      const remainingCss = projectFiles
-        .filter((f) => (f.language === 'css' || f.name.endsWith('.css')) && !embeddedFileIds.has(f.id))
+      // 4. Auto-inject companion CSS only if relevant:
+      // - Same base name as main HTML (e.g. divisorinteligente.css for divisorinteligente.html)
+      // - OR project has only 1 CSS file and HTML has no linked stylesheets
+      const mainBaseName = mainHtmlFile.name.replace(/\.[^/.]+$/, '').toLowerCase();
+      const hasExplicitCss = /<link\b[^>]*\brel=["']?stylesheet["']?/i.test(combinedHtml);
+      const allCssFiles = projectFiles.filter(
+        (f) => f.language === 'css' || f.name.toLowerCase().endsWith('.css')
+      );
+
+      const relevantUnlinkedCss = allCssFiles.filter((f) => {
+        if (embeddedFileIds.has(f.id)) return false;
+        const fBaseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
+        if (fBaseName === mainBaseName) return true;
+        if (!hasExplicitCss && allCssFiles.length === 1) return true;
+        return false;
+      });
+
+      const remainingCss = relevantUnlinkedCss
         .map((f) => {
           embeddedFileIds.add(f.id);
+          const rawCssContent = activeFileId && f.id === activeFileId ? code : f.content;
           const resolved = resolveCssImports(
-            f.content,
+            rawCssContent,
             f.path || f.name,
             projectFiles,
             new Set(),
             embeddedFileIds
           );
-          return `/* File: ${f.path || f.name} */\n${resolved}`;
+          return `/* Auto-injetado de: ${f.path || f.name} */\n${resolved}`;
         })
         .join('\n\n');
 
-      // 5. Bundle any remaining JS files that weren't explicitly linked
-      const remainingJsFiles = projectFiles.filter(
+      // 5. Auto-inject companion JS only if relevant:
+      // - Same base name as main HTML (e.g. portal.js for portal.html)
+      // - OR project has only 1 JS file and HTML has no <script> tags
+      const hasExplicitScripts = /<script\b/i.test(combinedHtml);
+      const allJsFiles = projectFiles.filter(
         (f) =>
-          (f.language === 'javascript' || f.language === 'typescript' || f.name.endsWith('.js') || f.name.endsWith('.ts')) &&
-          !embeddedFileIds.has(f.id)
+          (f.language === 'javascript' ||
+            f.language === 'typescript' ||
+            f.name.toLowerCase().endsWith('.js') ||
+            f.name.toLowerCase().endsWith('.ts')) &&
+          !f.name.toLowerCase().endsWith('.py')
       );
 
-      const remainingJsScripts = remainingJsFiles
+      const relevantUnlinkedJs = allJsFiles.filter((f) => {
+        if (embeddedFileIds.has(f.id)) return false;
+        const fBaseName = f.name.replace(/\.[^/.]+$/, '').toLowerCase();
+        if (fBaseName === mainBaseName) return true;
+        if (!hasExplicitScripts && allJsFiles.length === 1) return true;
+        return false;
+      });
+
+      const remainingJsScripts = relevantUnlinkedJs
         .map((f) => {
           embeddedFileIds.add(f.id);
-          // Check if file uses ES modules (import/export)
-          const usesModules = /\b(import\s+|export\s+)/.test(f.content);
+          const scriptContent = activeFileId && f.id === activeFileId ? code : f.content;
+          const usesModules = /\b(import\s+|export\s+)/.test(scriptContent);
           if (usesModules) {
+            const virtualScriptFile = { ...f, content: scriptContent };
             const { entryBlobUrl, createdBlobUrls, resolvedFileIds } = resolveJsModuleGraph(
-              f,
+              virtualScriptFile,
               projectFiles
             );
             if (createdBlobUrlsCollector) {
@@ -321,18 +508,18 @@ export function generatePreviewHtml(
             resolvedFileIds.forEach((id) => embeddedFileIds.add(id));
             return `<script type="module" src="${entryBlobUrl}" data-source="${f.path || f.name}"></script>`;
           }
-          return `<script data-source="${f.path || f.name}">\n// File: ${f.path || f.name}\ntry {\n${f.content}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}\n<\/script>`;
+          return `<script data-source="${f.path || f.name}">\n// Auto-injetado de: ${f.path || f.name}\ntry {\n${scriptContent}\n} catch(err) {\n  console.error('[Script Error ${f.path || f.name}]:', err);\n}\n<\/script>`;
         })
         .join('\n');
 
-      // Wrap if not a full HTML document
+      // Wrap in complete HTML document if missing <html> or <!DOCTYPE
       if (!combinedHtml.includes('<html') && !combinedHtml.includes('<!DOCTYPE')) {
         combinedHtml = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Projeto Preview</title>
+  <title>${mainHtmlFile.name}</title>
   ${remainingCss ? `<style id="project-unlinked-styles">\n${remainingCss}\n</style>` : ''}
 </head>
 <body>

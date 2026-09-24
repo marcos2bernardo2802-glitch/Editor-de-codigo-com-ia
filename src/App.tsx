@@ -652,7 +652,11 @@ export default function App() {
           if (loadedFiles.length > 0) {
             setFiles(loadedFiles);
             setWorkspaceMode('project');
-            const firstFile = loadedFiles.find((f) => f.path === 'index.html') || loadedFiles[0];
+            const firstFile =
+              loadedFiles.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
+              loadedFiles.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
+              loadedFiles.find((f) => f.name.toLowerCase().endsWith('.html') || f.name.toLowerCase().endsWith('.htm')) ||
+              loadedFiles[0];
             setActiveFileId(firstFile.id);
             setCode(firstFile.content);
             setLanguage(firstFile.language);
@@ -688,7 +692,11 @@ export default function App() {
       if (loadedFiles.length > 0) {
         setFiles(loadedFiles);
         setWorkspaceMode('project');
-        const firstFile = loadedFiles.find((f) => f.path === 'index.html') || loadedFiles[0];
+        const firstFile =
+          loadedFiles.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
+          loadedFiles.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
+          loadedFiles.find((f) => f.name.toLowerCase().endsWith('.html') || f.name.toLowerCase().endsWith('.htm')) ||
+          loadedFiles[0];
         setActiveFileId(firstFile.id);
         setCode(firstFile.content);
         setLanguage(firstFile.language);
@@ -715,7 +723,11 @@ export default function App() {
         if (loadedFiles.length > 0) {
           setFiles(loadedFiles);
           setWorkspaceMode('project');
-          const firstFile = loadedFiles.find((f) => f.path === 'index.html') || loadedFiles[0];
+          const firstFile =
+            loadedFiles.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
+            loadedFiles.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
+            loadedFiles.find((f) => f.name.toLowerCase().endsWith('.html') || f.name.toLowerCase().endsWith('.htm')) ||
+            loadedFiles[0];
           setActiveFileId(firstFile.id);
           setCode(firstFile.content);
           setLanguage(firstFile.language);
@@ -1999,7 +2011,11 @@ ${effectiveInstruction}`;
       if (mode === 'replace') {
         setFiles(incoming);
         setWorkspaceMode('project');
-        const first = incoming[0];
+        const first =
+          incoming.find((f) => (f.path || f.name).toLowerCase() === 'index.html') ||
+          incoming.find((f) => (f.path || f.name).toLowerCase().endsWith('/index.html')) ||
+          incoming.find((f) => f.name.toLowerCase().endsWith('.html') || f.name.toLowerCase().endsWith('.htm')) ||
+          incoming[0];
         if (first) {
           setActiveFileId(first.id);
           setCode(first.content);
