@@ -333,13 +333,13 @@ export const FileTreeExplorer: React.FC<FileTreeExplorerProps> = ({
   return (
     <aside className="w-56 sm:w-60 border-r border-[var(--border)] bg-[var(--panel)] flex flex-col shrink-0 transition-all duration-200 overflow-hidden">
       {/* Explorer Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)] bg-[var(--panel-2)] shrink-0 select-none">
+      <div className="flex items-center justify-between px-2.5 py-1 border-b border-[var(--border)] bg-[var(--panel-2)] shrink-0 select-none min-h-[30px]">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
-          <Layers className="w-3.5 h-3.5 text-[var(--accent)]" />
-          <span className="uppercase tracking-wider text-[10px] text-[var(--muted)]">Explorador</span>
+          <Layers className="w-3 h-3 text-[var(--accent)]" />
+          <span className="uppercase tracking-wider text-[9.5px] text-[var(--muted)]">Explorador</span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <button
             type="button"
             onClick={() => {
@@ -347,19 +347,19 @@ export const FileTreeExplorer: React.FC<FileTreeExplorerProps> = ({
               setNewFilePath('');
               setIsAdding(true);
             }}
-            className="p-1 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors cursor-pointer"
+            className="p-0.5 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors cursor-pointer"
             title="Novo arquivo (ex: src/App.tsx ou index.js)"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-3 h-3" />
           </button>
           <button
             type="button"
             onClick={onToggleOpen}
-            className="p-1 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors cursor-pointer"
+            className="p-0.5 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] rounded transition-colors cursor-pointer"
             title="Recolher árvore de arquivos (Ctrl+B)"
             aria-label="Recolher árvore de arquivos"
           >
-            <PanelLeftClose className="w-3.5 h-3.5" />
+            <PanelLeftClose className="w-3 h-3" />
           </button>
         </div>
       </div>

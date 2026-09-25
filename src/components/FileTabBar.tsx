@@ -93,26 +93,26 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
   const getFileBadge = (lang: SupportedLanguage) => {
     switch (lang) {
       case 'html':
-        return <span className="text-[10px] font-bold text-orange-400">HTML</span>;
+        return <span className="text-[9px] font-bold text-orange-400">HTML</span>;
       case 'css':
-        return <span className="text-[10px] font-bold text-blue-400">CSS</span>;
+        return <span className="text-[9px] font-bold text-blue-400">CSS</span>;
       case 'javascript':
-        return <span className="text-[10px] font-bold text-yellow-400">JS</span>;
+        return <span className="text-[9px] font-bold text-yellow-400">JS</span>;
       case 'typescript':
-        return <span className="text-[10px] font-bold text-sky-400">TS</span>;
+        return <span className="text-[9px] font-bold text-sky-400">TS</span>;
       case 'python':
-        return <span className="text-[10px] font-bold text-emerald-400">PY</span>;
+        return <span className="text-[9px] font-bold text-emerald-400">PY</span>;
       case 'json':
-        return <span className="text-[10px] font-bold text-amber-400">JSON</span>;
+        return <span className="text-[9px] font-bold text-amber-400">JSON</span>;
       case 'markdown':
-        return <span className="text-[10px] font-bold text-purple-400">MD</span>;
+        return <span className="text-[9px] font-bold text-purple-400">MD</span>;
       default:
-        return <FileCode className="w-3 h-3 text-[var(--muted)]" />;
+        return <FileCode className="w-2.5 h-2.5 text-[var(--muted)]" />;
     }
   };
 
   return (
-    <div className="flex items-center gap-1 px-2 pt-1 bg-[var(--panel-2)] border-b border-[var(--border)] overflow-x-auto no-scrollbar shrink-0 select-none">
+    <div className="flex items-center gap-1 px-1.5 pt-0.5 bg-[var(--panel-2)] border-b border-[var(--border)] overflow-x-auto no-scrollbar shrink-0 select-none min-h-[30px]">
       {/* File Tabs */}
       {files.map((file) => {
         const isActive = file.id === activeFileId;
@@ -126,9 +126,9 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
               setEditingFileId(file.id);
               setEditingFileName(file.path || file.name);
             }}
-            className={`group relative flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-t-lg border-t border-x transition-colors cursor-pointer shrink-0 max-w-[200px] ${
+            className={`group relative flex items-center gap-1.5 px-2 py-1 text-[11px] rounded-t-md border-t border-x transition-colors cursor-pointer shrink-0 max-w-[180px] ${
               isActive
-                ? 'bg-[var(--bg)] text-[var(--text)] border-[var(--border)] font-medium -mb-px pb-2'
+                ? 'bg-[var(--bg)] text-[var(--text)] border-[var(--border)] font-medium -mb-px pb-1.5'
                 : 'bg-[var(--panel-2)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] border-transparent'
             }`}
           >
@@ -145,19 +145,19 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
                     if (e.key === 'Escape') setEditingFileId(null);
                   }}
                   onBlur={handleConfirmRename}
-                  className="w-24 px-1 py-0.5 bg-[var(--panel)] border border-[var(--accent)] rounded text-xs text-[var(--text)] focus:outline-none"
+                  className="w-24 px-1 py-0.5 bg-[var(--panel)] border border-[var(--accent)] rounded text-[11px] text-[var(--text)] focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleConfirmRename}
                   className="text-[var(--accent)] hover:opacity-80 p-0.5"
                 >
-                  <Check className="w-3 h-3" />
+                  <Check className="w-2.5 h-2.5" />
                 </button>
               </div>
             ) : (
               <span
-                className="truncate text-[11px]"
+                className="truncate text-[10.5px]"
                 title={`${file.path || file.name} (Clique duplo para renomear)`}
               >
                 {file.name}
@@ -176,7 +176,7 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--muted)] hover:text-[var(--text)] transition-opacity"
                 title="Renomear arquivo/caminho"
               >
-                <Edit2 className="w-2.5 h-2.5" />
+                <Edit2 className="w-2 h-2" />
               </button>
             )}
 
@@ -191,7 +191,7 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
                 className="p-0.5 rounded text-[var(--muted)] hover:text-[var(--rem)] hover:bg-[var(--panel-2)] transition-colors opacity-70 hover:opacity-100"
                 title={`Fechar ${file.name}`}
               >
-                <X className="w-3 h-3" />
+                <X className="w-2.5 h-2.5" />
               </button>
             )}
           </div>
@@ -200,8 +200,8 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
 
       {/* Add File Inline Input or Button */}
       {isAdding ? (
-        <div className="flex items-center gap-1 px-2 py-1 bg-[var(--panel)] rounded-md border border-[var(--accent)] shrink-0">
-          <FileText className="w-3 h-3 text-[var(--accent)]" />
+        <div className="flex items-center gap-1 px-1.5 py-0.5 bg-[var(--panel)] rounded border border-[var(--accent)] shrink-0">
+          <FileText className="w-2.5 h-2.5 text-[var(--accent)]" />
           <input
             ref={addInputRef}
             value={newFileName}
@@ -211,23 +211,23 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
               if (e.key === 'Escape') setIsAdding(false);
             }}
             placeholder="ex: components/Button.tsx"
-            className="w-36 bg-transparent text-xs text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]/60"
+            className="w-32 bg-transparent text-[11px] text-[var(--text)] focus:outline-none placeholder:text-[var(--muted)]/60"
           />
           <button
             type="button"
             onClick={handleConfirmAdd}
-            className="p-1 text-[var(--accent)] hover:opacity-80"
+            className="p-0.5 text-[var(--accent)] hover:opacity-80"
             title="Criar arquivo"
           >
-            <Check className="w-3 h-3" />
+            <Check className="w-2.5 h-2.5" />
           </button>
           <button
             type="button"
             onClick={() => setIsAdding(false)}
-            className="p-1 text-[var(--muted)] hover:text-[var(--text)]"
+            className="p-0.5 text-[var(--muted)] hover:text-[var(--text)]"
             title="Cancelar"
           >
-            <X className="w-3 h-3" />
+            <X className="w-2.5 h-2.5" />
           </button>
         </div>
       ) : (
@@ -235,11 +235,11 @@ export const FileTabBar: React.FC<FileTabBarProps> = ({
           id="btnAddFile"
           type="button"
           onClick={() => setIsAdding(true)}
-          className="flex items-center gap-1 px-2 py-1 text-xs rounded text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] transition-colors cursor-pointer shrink-0 ml-1"
+          className="flex items-center gap-1 px-1.5 py-0.5 text-[10.5px] rounded text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] transition-colors cursor-pointer shrink-0 ml-0.5"
           title="Adicionar novo arquivo (suporta pastas como src/App.js)"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="text-[11px]">Novo Arquivo</span>
+          <Plus className="w-3 h-3" />
+          <span className="text-[10px]">Novo</span>
         </button>
       )}
     </div>

@@ -189,15 +189,15 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   return (
     <section className="flex-1 min-w-0 flex flex-col border-b md:border-b-0 md:border-r border-[var(--border)] bg-[var(--bg)] h-full overflow-hidden">
       {/* Editor Sub-header */}
-      <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none">
+      <div className="flex items-center justify-between gap-2 px-2.5 sm:px-3 py-1 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none min-h-[30px]">
         {/* Left: View Mode Switcher & Workspace Mode Selector */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* View mode switcher (Apenas os ícones) */}
-          <div className="flex items-center p-0.5 rounded-md bg-[var(--panel-2)] border border-[var(--border)]">
+          <div className="flex items-center p-0.5 rounded bg-[var(--panel-2)] border border-[var(--border)]">
             <button
               id="tabViewCode"
               onClick={() => onChangeViewMode('code')}
-              className={`p-1 rounded text-xs transition-all cursor-pointer ${
+              className={`p-0.5 rounded transition-all cursor-pointer ${
                 viewMode === 'code'
                   ? 'bg-[var(--panel)] text-[var(--accent)] font-semibold shadow-xs'
                   : 'text-[var(--muted)] hover:text-[var(--text)]'
@@ -205,13 +205,13 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               title="Código (Exibir apenas editor)"
               aria-label="Código"
             >
-              <Code2 className="w-3.5 h-3.5" />
+              <Code2 className="w-3 h-3" />
             </button>
 
             <button
               id="tabViewPreview"
               onClick={() => onChangeViewMode('preview')}
-              className={`p-1 rounded text-xs transition-all cursor-pointer ${
+              className={`p-0.5 rounded transition-all cursor-pointer ${
                 viewMode === 'preview'
                   ? 'bg-[var(--panel)] text-[var(--accent)] font-semibold shadow-xs'
                   : 'text-[var(--muted)] hover:text-[var(--text)]'
@@ -219,13 +219,13 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               title="Visualizador (Exibir apenas preview renderizado)"
               aria-label="Visualizador"
             >
-              <Eye className="w-3.5 h-3.5" />
+              <Eye className="w-3 h-3" />
             </button>
 
             <button
               id="tabViewSplit"
               onClick={() => onChangeViewMode('split')}
-              className={`p-1 rounded text-xs transition-all cursor-pointer ${
+              className={`p-0.5 rounded transition-all cursor-pointer ${
                 viewMode === 'split'
                   ? 'bg-[var(--panel)] text-[var(--accent)] font-semibold shadow-xs'
                   : 'text-[var(--muted)] hover:text-[var(--text)]'
@@ -233,39 +233,39 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               title="Dividir tela lado a lado (Editor + Preview)"
               aria-label="Dividir tela"
             >
-              <Columns className="w-3.5 h-3.5" />
+              <Columns className="w-3 h-3" />
             </button>
           </div>
 
-          <div className="h-3.5 w-[1px] bg-[var(--border)] hidden sm:block" />
+          <div className="h-3 w-[1px] bg-[var(--border)] hidden sm:block" />
 
           {/* Workspace Mode Selector (Modo Único vs Modo Projeto) */}
-          <div className="flex items-center p-0.5 rounded-md bg-[var(--panel-2)] border border-[var(--border)]">
+          <div className="flex items-center p-0.5 rounded bg-[var(--panel-2)] border border-[var(--border)]">
             <button
               id="btnWorkspaceSingle"
               onClick={() => onChangeWorkspaceMode('single')}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] leading-tight transition-colors cursor-pointer ${
                 workspaceMode === 'single'
                   ? 'bg-[var(--panel)] text-[var(--text)] font-semibold shadow-xs'
                   : 'text-[var(--muted)] hover:text-[var(--text)]'
               }`}
               title="Modo padrão: editar um arquivo único"
             >
-              <FileCode className="w-3 h-3" />
+              <FileCode className="w-2.5 h-2.5" />
               <span className="hidden sm:inline">Único</span>
             </button>
 
             <button
               id="btnWorkspaceProject"
               onClick={() => onChangeWorkspaceMode('project')}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] leading-tight transition-colors cursor-pointer ${
                 workspaceMode === 'project'
                   ? 'bg-[var(--accent)] text-[#1a1206] font-semibold shadow-xs'
                   : 'text-[var(--muted)] hover:text-[var(--text)]'
               }`}
               title="Modo projeto: múltiplos arquivos com abas (HTML + CSS + JS)"
             >
-              <FolderTree className="w-3 h-3" />
+              <FolderTree className="w-2.5 h-2.5" />
               <span className="hidden sm:inline">Projeto ({files.length})</span>
             </button>
           </div>
@@ -273,7 +273,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
 
         {/* Right: Code stats info */}
         <div className="flex items-center gap-2 ml-auto">
-          <span className="text-[11px] font-mono text-[var(--muted)]/80">
+          <span className="text-[10px] font-mono text-[var(--muted)]/80">
             {lineCount} {lineCount === 1 ? 'linha' : 'linhas'} • {charCount} chars
           </span>
         </div>

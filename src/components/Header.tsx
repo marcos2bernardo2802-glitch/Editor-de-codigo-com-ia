@@ -92,34 +92,16 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeViewMode,
 }) => {
   return (
-    <header className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none">
-      {/* Brand, Mode & MenuBar */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-base font-bold tracking-tight m-0 inline-flex items-center select-none cursor-default group-genia transition-transform duration-200 hover:scale-105">
-            <span className="text-orange-500 dark:text-orange-400 font-extrabold tracking-tight animate-gen-glow">Gen</span>
-            <span className="text-sky-500 dark:text-sky-400 font-black tracking-wide ml-0.5 animate-ia-glow">IA</span>
-          </h1>
-          <span
-            className="hidden sm:inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full border border-[var(--border)] bg-[var(--panel-2)] text-[var(--muted)]"
-            title={`Planejamento: ${config.planningProvider || 'colab'} | Execução: ${config.executionProvider || 'gemini'}`}
-          >
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]"></span>
-              <span className="text-[var(--text)] font-mono text-[10px]">Plan:</span>
-              <span className="capitalize text-[var(--muted)]">{config.planningProvider || 'colab'}</span>
-            </span>
-            <span className="text-[var(--border)]">|</span>
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--add)]"></span>
-              <span className="text-[var(--text)] font-mono text-[10px]">Exec:</span>
-              <span className="capitalize text-[var(--muted)]">{config.executionProvider || 'gemini'}</span>
-            </span>
-          </span>
-        </div>
+    <header className="flex items-center justify-between px-3 sm:px-4 py-1.5 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none min-h-[40px]">
+      {/* Brand & MenuBar alinhados à esquerda */}
+      <div className="flex items-center gap-2 sm:gap-2.5">
+        <h1 className="text-sm sm:text-base font-bold tracking-tight m-0 inline-flex items-center select-none cursor-default group-genia transition-transform duration-200 hover:scale-105">
+          <span className="text-orange-500 dark:text-orange-400 font-extrabold tracking-tight animate-gen-glow">Gen</span>
+          <span className="text-sky-500 dark:text-sky-400 font-black tracking-wide ml-0.5 animate-ia-glow">IA</span>
+        </h1>
 
-        {/* Separator and Horizontal MenuBar (Arquivo, Editar, Exibir) */}
-        <div className="h-4 w-[1px] bg-[var(--border)] hidden sm:block mx-1" />
+        {/* Separator and Horizontal MenuBar (Arquivo, Editar, Exibir, Seleção, Acessar) */}
+        <div className="h-4 w-[1px] bg-[var(--border)] hidden sm:block mx-0.5" />
         <MenuBar
           canUndo={canUndo}
           canRedo={canRedo}
@@ -152,61 +134,79 @@ export const Header: React.FC<HeaderProps> = ({
         />
       </div>
 
-      {/* Status indicator & Local folder indicator */}
-      <div className="hidden md:flex items-center gap-2 text-xs">
-        {/* Local folder subtle status badge */}
+      {/* Ações, Marcadores Plan/Exec e Botões de Ícones alinhados à direita */}
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Marcadores: Plan e Exec */}
+        <span
+          className="hidden md:inline-flex items-center gap-1.5 text-[10.5px] px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--panel-2)] text-[var(--muted)]"
+          title={`Planejamento: ${config.planningProvider || 'colab'} | Execução: ${config.executionProvider || 'gemini'}`}
+        >
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]"></span>
+            <span className="text-[var(--text)] font-mono text-[9.5px]">Plan:</span>
+            <span className="capitalize text-[var(--muted)]">{config.planningProvider || 'colab'}</span>
+          </span>
+          <span className="text-[var(--border)]">|</span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--add)]"></span>
+            <span className="text-[var(--text)] font-mono text-[9.5px]">Exec:</span>
+            <span className="capitalize text-[var(--muted)]">{config.executionProvider || 'gemini'}</span>
+          </span>
+        </span>
+
+        {/* Botão "Em memória" / Pasta local (apenas ícone com legenda ao passar o mouse) */}
         {onOpenLocalFolderSettings && (
           <button
             id="btnHeaderLocalFolderStatus"
             type="button"
             onClick={onOpenLocalFolderSettings}
-            className={`flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+            className={`p-1.5 rounded-md border transition-all cursor-pointer flex items-center justify-center ${
               localFolderConnected
                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-                : 'border-[var(--border)] bg-[var(--panel-2)]/60 text-[var(--muted)] hover:text-[var(--text)]'
+                : 'border-[var(--border)] bg-[var(--panel-2)]/60 text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]'
             }`}
             title={
               localFolderConnected
-                ? `Pasta local: ${localFolderName} (${saveMode === 'auto' ? 'Autosave ligado' : 'Salvar manual'}) — clique para abrir configurações`
+                ? `Pasta local conectada: ${localFolderName} (${saveMode === 'auto' ? 'Autosave ligado' : 'Salvar manual'}) — clique para abrir configurações`
                 : 'Armazenamento em memória (sem pasta local conectada) — clique para conectar pasta'
+            }
+            aria-label={
+              localFolderConnected
+                ? `Pasta local: ${localFolderName}`
+                : 'Armazenamento em memória'
             }
           >
             {localFolderConnected ? (
-              <>
-                <FolderCheck className="w-3 h-3 text-emerald-400 shrink-0" />
-                <span className="max-w-[100px] truncate font-medium">{localFolderName}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-              </>
+              <div className="relative flex items-center justify-center">
+                <FolderCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-[var(--panel)]" />
+              </div>
             ) : (
-              <>
-                <HardDrive className="w-3 h-3 text-[var(--muted)] shrink-0" />
-                <span className="hidden lg:inline text-[10px]">Em memória</span>
-              </>
+              <HardDrive className="w-3.5 h-3.5 text-[var(--muted)]" />
             )}
           </button>
         )}
-      </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Botão Exemplos (apenas ícone com legenda ao passar o mouse) */}
         <button
           id="btnTemplates"
           onClick={onOpenTemplates}
-          className="flex items-center gap-1 px-2 py-1 text-[11px] text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-md bg-transparent transition-colors cursor-pointer"
+          className="p-1.5 text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)] hover:border-[var(--muted)] rounded-md bg-[var(--panel-2)]/60 hover:bg-[var(--panel-2)] transition-colors cursor-pointer flex items-center justify-center"
           title="Exemplos de código para testar"
+          aria-label="Exemplos de código"
         >
-          <Code2 className="w-3 h-3" />
-          <span className="hidden sm:inline">Exemplos</span>
+          <Code2 className="w-3.5 h-3.5" />
         </button>
 
+        {/* Botão Conexão (apenas ícone com legenda ao passar o mouse) */}
         <button
           id="btnSettings"
           onClick={onOpenSettings}
-          className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-[var(--text)] bg-[var(--panel-2)] hover:bg-[var(--border)] border border-[var(--border)] rounded-md transition-colors cursor-pointer"
+          className="p-1.5 text-[var(--text)] bg-[var(--panel-2)] hover:bg-[var(--border)] border border-[var(--border)] rounded-md transition-colors cursor-pointer flex items-center justify-center"
           title="Configurações de conexão da IA"
+          aria-label="Configurações de conexão da IA"
         >
-          <Settings className="w-3 h-3 text-[var(--accent)]" />
-          <span>Conexão</span>
+          <Settings className="w-3.5 h-3.5 text-[var(--accent)]" />
         </button>
       </div>
     </header>
