@@ -72,6 +72,10 @@ interface SidePanelProps {
   onExplainCode?: () => void;
   onCancelInstruction?: () => void;
 
+  // Connection Status
+  status: 'connected' | 'disconnected' | 'testing';
+  statusText: string;
+
   // Resizable panel width (desktop)
   width?: number;
 }
@@ -105,6 +109,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   onClearSelection,
   onExplainCode,
   onCancelInstruction,
+  status,
+  statusText,
   width,
 }) => {
   const chatLogRef = useRef<HTMLDivElement>(null);
@@ -225,10 +231,22 @@ export const SidePanel: React.FC<SidePanelProps> = ({
     >
       {/* 1. Header do chat: compacto e discreto */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--border)] shrink-0 select-none bg-[var(--panel)]">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)] m-0">
             Assistente de IA
           </h2>
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`w-2 h-2 rounded-full transition-colors ${
+                status === 'connected'
+                  ? 'bg-[var(--add)] ring-2 ring-[var(--add)]/20'
+                  : status === 'testing'
+                  ? 'bg-[var(--accent)] animate-pulse'
+                  : 'bg-[var(--rem)]'
+              }`}
+            />
+            <span className="capitalize text-[10px] text-[var(--muted)] font-normal">{statusText}</span>
+          </div>
           {messages.length > 0 && (
             <span className="text-[9px] px-1 py-0.2 rounded bg-[var(--panel-2)] text-[var(--muted)] font-mono">
               {messages.length}
@@ -827,8 +845,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                   : 'Selecione um trecho e digite a instrução...'
                 : 'Descreva a alteração no código...'
             }
-            rows={2}
-            className="flex-1 resize-none bg-[var(--panel-2)] border border-[var(--border)] rounded-md text-[var(--text)] px-2.5 py-1.5 text-xs leading-relaxed focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted)]/60 font-sans"
+            rows={3}
+            className="flex-1 resize-none bg-[var(--panel-2)] border border-[var(--border)] rounded-md text-[var(--text)] px-2.5 py-1.5 text-[11px] leading-relaxed focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted)]/60 font-sans"
           />
 
           {/* Coluna de ações: clipe (acima) e enviar / parar (abaixo) para economizar espaço horizontal */}

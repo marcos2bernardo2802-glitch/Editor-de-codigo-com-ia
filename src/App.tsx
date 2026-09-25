@@ -2565,6 +2565,8 @@ ${effectiveInstruction}`;
           onDiscardDiff={handleDiscardDiff}
           onSelectQuickPrompt={(p) => setInstruction(p)}
           currentCode={code}
+          status={status}
+          statusText={statusText}
           // Multimodal (Images)
           attachedImages={attachedImages}
           onAddImages={handleAddImages}

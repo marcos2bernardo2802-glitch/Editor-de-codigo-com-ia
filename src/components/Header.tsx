@@ -154,19 +154,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Status indicator & Local folder indicator */}
       <div className="hidden md:flex items-center gap-2 text-xs">
-        <div className="flex items-center gap-2 text-[var(--muted)]">
-          <span
-            className={`w-2 h-2 rounded-full transition-colors ${
-              status === 'connected'
-                ? 'bg-[var(--add)] ring-2 ring-[var(--add)]/20'
-                : status === 'testing'
-                ? 'bg-[var(--accent)] animate-pulse'
-                : 'bg-[var(--rem)]'
-            }`}
-          />
-          <span className="capitalize">{statusText}</span>
-        </div>
-
         {/* Local folder subtle status badge */}
         {onOpenLocalFolderSettings && (
           <button
