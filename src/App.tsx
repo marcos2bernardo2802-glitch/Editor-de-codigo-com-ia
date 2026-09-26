@@ -33,6 +33,8 @@ import { processDroppedData } from './utils/dropHandler';
 import { processImageFiles } from './utils/imageResize';
 import { getShortModelName } from './utils/modelNames';
 import { callGeminiClientDirect, testGeminiKeysDirect } from './utils/geminiClient';
+import { extractEditTargetMarker } from './utils/editTarget';
+import { locateTargetByName } from './utils/codeLocator';
 import {
   isFileSystemAccessSupported,
   openLocalFolder,
@@ -176,6 +178,7 @@ export default function App() {
   // Selection & AI Scope state (Opcional: Modo Completo ou Modo Seleção)
   const [aiScopeMode, setAiScopeMode] = useState<AIScopeMode>('full');
   const [selection, setSelection] = useState<SelectionRange | null>(null);
+  const [pendingEditTarget, setPendingEditTarget] = useState<{ filePath: string; targetName: string } | null>(null);
 
   // History stack for Undo / Redo
   const [history, setHistory] = useState<string[]>([CODE_TEMPLATES[0].code]);
@@ -1198,9 +1201,31 @@ export default function App() {
         ? resolveColabModel(config.colabPlanningModel)
         : resolveColabModel(config.colabExecutionModel);
 
+    const currentCode = code;
+
+    // Quando workspaceMode === 'project', enviamos todos os arquivos do projeto e o path do arquivo ativo
+    const isProjectMode = workspaceMode === 'project' && files.length > 0;
+    const activeFileObj = files.find((f) => f.id === activeFileId);
+    const activeFilePath = isProjectMode
+      ? (activeFileObj?.path || activeFileObj?.name || 'index.html')
+      : undefined;
+
+    let autoSelection: SelectionRange | null = null;
+    if (currentMode === 'execute' && pendingEditTarget && !selection) {
+      const activePathNorm = (activeFilePath || '').trim().toLowerCase();
+      const targetPathNorm = pendingEditTarget.filePath.trim().toLowerCase();
+      if (activePathNorm && targetPathNorm && activePathNorm === targetPathNorm) {
+        autoSelection = locateTargetByName(currentCode, pendingEditTarget.targetName);
+      }
+    }
+    if (currentMode === 'execute') {
+      setPendingEditTarget(null);
+    }
+    console.log('[DEBUG AUTO SELECTION]', { pendingEditTarget, autoSelection, activeFilePath });
+
     // Check Selection Mode constraints
     if (currentMode === 'execute' && effectiveScope === 'selection') {
-      if (!selection || !selection.text.trim()) {
+      if (!autoSelection && (!selection || !selection.text.trim())) {
         const infoMsg: ChatMessage = {
           id: `info-${Date.now()}`,
           type: 'error',
@@ -1295,8 +1320,8 @@ ${visionAnalysisText}
 ${userPromptText}`
       : userPromptText;
 
-    const isSelection = effectiveScope === 'selection' && Boolean(selection);
-    const capturedSelection = selection;
+    const isSelection = (effectiveScope === 'selection' && Boolean(selection)) || Boolean(autoSelection);
+    const capturedSelection = autoSelection || selection;
 
     const userMsg: ChatMessage = {
       id: String(Date.now()),
@@ -1317,14 +1342,6 @@ ${userPromptText}`
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
 
-    const currentCode = code;
-
-    // Quando workspaceMode === 'project', enviamos todos os arquivos do projeto e o path do arquivo ativo
-    const isProjectMode = workspaceMode === 'project' && files.length > 0;
-    const activeFileObj = files.find((f) => f.id === activeFileId);
-    const activeFilePath = isProjectMode
-      ? (activeFileObj?.path || activeFileObj?.name || 'index.html')
-      : undefined;
     const projectFilesPayload = isProjectMode
       ? files.map((f) => ({
           path: f.path || f.name,
@@ -1410,10 +1427,15 @@ ${userPromptText}`
             }
           }
 
+          console.log('[DEBUG PLAN TEXT - GEMINI]', JSON.stringify(planText));
+          const marker = extractEditTargetMarker(planText);
+          console.log('[DEBUG MARKER - GEMINI]', marker);
+          setPendingEditTarget(marker ? { filePath: marker.filePath, targetName: marker.targetName } : null);
+
           const planMsg: ChatMessage = {
             id: `plan-${Date.now()}`,
             type: 'explanation',
-            text: planText || 'Sem resposta do assistente de planejamento.',
+            text: marker ? marker.cleanedText : (planText || 'Sem resposta do assistente de planejamento.'),
             mode: 'plan',
             timestamp: Date.now(),
             provider: `${config.geminiModel || 'Gemini'} (Planejamento)`,
@@ -1424,7 +1446,14 @@ ${userPromptText}`
           setStatusText('Gemini pronto');
         } else {
           // Colab (ngrok) planning mode with streaming
-          let targetUrl = config.endpointUrl.trim();
+          const rawEndpoint = (config.endpointUrl || '').trim();
+          if (!rawEndpoint) {
+            throw new Error(
+              'O endpoint do Google Colab / ngrok não foi configurado.\n\n• Para usar a IA agora: altere o provedor de Planejamento para "Gemini" no seletor ou nas Configurações (ícone de engrenagem).\n• Para usar o Colab: abra as Configurações (aba "Google Colab / ngrok") e informe a URL do túnel ngrok do seu notebook.'
+            );
+          }
+
+          let targetUrl = rawEndpoint;
           if (!targetUrl.includes('/v1/') && !targetUrl.includes('/api/')) {
             targetUrl = targetUrl.replace(/\/+$/, '') + '/v1/chat/completions';
           }
@@ -1447,9 +1476,9 @@ ${userPromptText}`
           }
 
           // If still empty, try quick automatic discovery from /v1/models
-          if (!modelName) {
+          if (!modelName && rawEndpoint) {
             try {
-              const baseUrl = config.endpointUrl.trim().replace(/\/+$/, '');
+              const baseUrl = rawEndpoint.replace(/\/+$/, '');
               const modelCheckRes = await fetch(config.useProxy ? '/api/proxy' : `${baseUrl}/v1/models`, {
                 method: config.useProxy ? 'POST' : 'GET',
                 headers,
@@ -1506,7 +1535,7 @@ ${effectiveInstruction}`
               {
                 role: 'system',
                 content:
-                  'Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.',
+                  'Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.\n\nQuando, ao longo da conversa, você identificar com clareza que a alteração pedida pelo usuário precisa acontecer dentro de UMA função, componente ou classe específica e nomeável de UM arquivo específico do projeto (não peça isso se a mudança for espalhada por múltiplos lugares ou não tiver um alvo único claro), inclua, na ÚLTIMA linha da sua resposta, e somente nesse caso, uma marcação neste formato exato, substituindo os valores entre aspas pelos valores reais:\n[[ALVO_EDICAO: arquivo="caminho/do/arquivo.ext" nome="nomeDaFuncaoOuComponenteOuClasse"]]\nNão explique essa marcação para o usuário, não a mencione na conversa, apenas inclua a linha exatamente nesse formato quando aplicável. Se não houver um alvo único e claro, não inclua marcação nenhuma.',
               },
               {
                 role: 'user',
@@ -1593,13 +1622,18 @@ ${effectiveInstruction}`
             },
           });
 
+          console.log('[DEBUG PLAN TEXT - COLAB]', JSON.stringify(streamResult.content));
+          const marker = extractEditTargetMarker(streamResult.content || '');
+          console.log('[DEBUG MARKER - COLAB]', marker);
+          setPendingEditTarget(marker ? { filePath: marker.filePath, targetName: marker.targetName } : null);
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === planMsgId
                 ? {
                     ...m,
                     text:
-                      streamResult.content ||
+                      (marker ? marker.cleanedText : streamResult.content) ||
                       (streamResult.thinking
                         ? '*(Raciocínio concluído sem texto final)*'
                         : 'Sem resposta do assistente de planejamento.'),
@@ -1764,7 +1798,7 @@ ${effectiveInstruction}`;
               body.model = activeColabModel;
             } else if (config.colabModel?.trim()) {
               body.model = config.colabModel.trim();
-            } else if (!body.model || body.model.includes('mistral')) {
+            } else if ((!body.model || body.model.includes('mistral')) && config.endpointUrl?.trim()) {
               // Attempt quick auto-discovery from /v1/models
               try {
                 const baseUrl = config.endpointUrl.trim().replace(/\/+$/, '');
@@ -1818,13 +1852,20 @@ ${effectiveInstruction}`;
           // Ativa streaming no payload para manter transferência constante de chunks (evita timeout HTTP do ngrok)
           body.stream = true;
 
+          const rawExecEndpoint = (config.endpointUrl || '').trim();
+          if (!rawExecEndpoint) {
+            throw new Error(
+              'O endpoint do Google Colab / ngrok não foi configurado.\n\n• Para gerar código com a IA agora: altere o provedor de Execução para "Gemini" no seletor ou nas Configurações (ícone de engrenagem).\n• Para usar o Colab: abra as Configurações (aba "Google Colab / ngrok") e informe a URL do túnel ngrok do seu notebook.'
+            );
+          }
+
           const headers: Record<string, string> = {
             'Content-Type': 'application/json',
             'ngrok-skip-browser-warning': '1',
           };
           if (config.authToken) headers['Authorization'] = `Bearer ${config.authToken}`;
 
-          let targetUrl = config.endpointUrl.trim();
+          let targetUrl = rawExecEndpoint;
           if (!targetUrl.includes('/v1/') && !targetUrl.includes('/api/')) {
             targetUrl = targetUrl.replace(/\/+$/, '') + '/v1/chat/completions';
           }
@@ -2016,11 +2057,23 @@ ${effectiveInstruction}`;
       const isColabModelNotFound =
         activeProvider === 'colab' &&
         !isBackendMissing &&
+        !errMsg.includes('página HTML') &&
         (errMsg.includes('MODEL_NOT_FOUND') ||
-        errMsg.toLowerCase().includes('model not found') ||
-        errMsg.toLowerCase().includes('model_not_found') ||
-        errMsg.toLowerCase().includes('does not exist') ||
-        (errMsg.includes('404') && !errMsg.includes('HTTP 404')));
+          errMsg.toLowerCase().includes('model not found') ||
+          errMsg.toLowerCase().includes('model_not_found') ||
+          errMsg.toLowerCase().includes('does not exist'));
+
+      const isColabEndpointIssue =
+        activeProvider === 'colab' &&
+        !isColabModelNotFound &&
+        (errMsg.includes('ENDPOINT_NOT_FOUND') ||
+          errMsg.includes('página HTML') ||
+          errMsg.includes('não foi configurado') ||
+          errMsg.includes('Status 404') ||
+          errMsg.includes('HTTP 404') ||
+          errMsg.includes('ECONNREFUSED') ||
+          errMsg.includes('ENOTFOUND') ||
+          errMsg.includes('Tempo limite excedido ao conectar'));
 
       let userFacingError = errMsg || 'Falha na comunicação. Verifique se o servidor está ativo e com as credenciais corretas.';
 
@@ -2044,6 +2097,13 @@ ${effectiveInstruction}`;
           details += '💡 Sugestão: Abra as Configurações (aba "Google Colab / ngrok") e clique em "Detectar modelo" para verificar os modelos atualmente carregados no seu endpoint.';
         }
         userFacingError = details;
+      } else if (isColabEndpointIssue) {
+        userFacingError =
+          '⚠️ Não foi possível conectar ao Google Colab / ngrok.\n\n' +
+          (errMsg.includes('não foi configurado')
+            ? '• O endpoint do Colab não está configurado nas Configurações.\n\n'
+            : '• O servidor externo ou túnel ngrok retornou erro (túnel offline ou URL expirada).\n\n') +
+          '💡 Dica rápida: Para continuar utilizando o assistente de IA agora, altere o provedor para "Gemini" clicando no seletor ou no botão de Configurações no topo.';
       }
 
       const errorMsg: ChatMessage = {

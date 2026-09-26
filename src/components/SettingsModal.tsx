@@ -1106,10 +1106,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Row 3: Retractable Auxiliary Vision */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-2)]/20 overflow-hidden">
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setVisionSectionOpen((prev) => !prev)}
-                  className="w-full flex items-center justify-between p-3 text-left hover:bg-[var(--panel-2)]/40 transition-colors cursor-pointer"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setVisionSectionOpen((prev) => !prev);
+                    }
+                  }}
+                  className="w-full flex items-center justify-between p-3 text-left hover:bg-[var(--panel-2)]/40 transition-colors cursor-pointer select-none"
                 >
                   <div className="flex items-center gap-2">
                     {visionSectionOpen ? (
@@ -1124,7 +1131,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <InfoTooltip text="Usada só quando o modelo do Plan ou do Act não aceita imagens; descreve o print e envia o texto como contexto." />
                   </div>
                   <Eye className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                </button>
+                </div>
 
                 {visionSectionOpen && (
                   <div className="p-3.5 pt-0 border-t border-[var(--border)]/40 space-y-3 bg-[var(--panel)]/40">

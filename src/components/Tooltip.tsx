@@ -257,9 +257,9 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({
 
   return (
     <span className={`relative inline-flex items-center align-middle ${className}`}>
-      <button
+      <span
         ref={triggerRef}
-        type="button"
+        role="button"
         aria-label={ariaLabel}
         tabIndex={0}
         onMouseEnter={() => setIsOpen(true)}
@@ -271,10 +271,17 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({
           e.stopPropagation();
           setIsOpen((prev) => !prev);
         }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsOpen((prev) => !prev);
+          }
+        }}
         className="p-0.5 rounded text-[var(--muted)] hover:text-[var(--text)] focus:text-[var(--accent)] focus:outline-none transition-colors cursor-pointer inline-flex items-center justify-center opacity-75 hover:opacity-100"
       >
         <Info className="w-3.5 h-3.5" />
-      </button>
+      </span>
 
       {isOpen &&
         createPortal(

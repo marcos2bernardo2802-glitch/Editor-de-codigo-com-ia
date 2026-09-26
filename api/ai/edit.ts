@@ -69,7 +69,7 @@ export default async function handler(req: any, res: any) {
       context += `\nArquivos do projeto (${projectFiles.length}):\n` +
         projectFiles.map((f: any) => `--- ${f.path || f.name} ---\n${String(f.content || '').slice(0, 5000)}`).join('\n\n');
     }
-    if (code) {
+    if (code && !(scope === 'selection' && selectedText)) {
       context += `\nCódigo original (${activeFilePath || language}):\n\`\`\`${language}\n${String(code).slice(0, 10000)}\n\`\`\``;
     }
     if (selectedText) {

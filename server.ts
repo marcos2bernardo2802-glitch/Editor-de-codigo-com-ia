@@ -531,6 +531,50 @@ function buildProjectContext(
   return { hasMultiFiles: true, contextText };
 }
 
+// TODO: ajustar estes valores para os limites reais e atuais de cada modelo
+function getModelContextWindowTokens(model: string): number {
+  const normalized = (model || "").toLowerCase();
+  if (normalized.includes("flash-lite")) {
+    return 250000;
+  }
+  if (normalized.includes("flash")) {
+    return 1000000;
+  }
+  if (normalized.includes("pro")) {
+    return 1000000;
+  }
+  return 500000;
+}
+
+// TODO: ajustar para os limites reais e atuais de saída de cada modelo
+function getModelMaxOutputTokensCap(model: string): number {
+  const normalized = (model || "").toLowerCase();
+  if (normalized.includes("flash-lite")) {
+    return 8192;
+  }
+  if (normalized.includes("flash")) {
+    return 8192;
+  }
+  if (normalized.includes("pro")) {
+    return 8192;
+  }
+  return 8192;
+}
+
+function calculateOutputTokenBudget(sourceText: string, model: string): number {
+  const estimatedTokens = Math.ceil((sourceText ? sourceText.length : 0) / 3);
+  const withMargin = Math.ceil(estimatedTokens * 1.3);
+  const cap = getModelMaxOutputTokensCap(model);
+  return Math.max(Math.min(withMargin, cap), 1024);
+}
+
+function calculateCodeCharBudget(model: string, reservedOutputTokens: number = 8000): number {
+  const totalTokens = getModelContextWindowTokens(model);
+  const remainingTokens = totalTokens - (reservedOutputTokens + 1000);
+  const charBudget = remainingTokens * 3;
+  return Math.max(charBudget, 20000);
+}
+
 // 1. Planning / Chat Endpoint: Conversational mentoring without rewriting code
 app.post("/api/ai/plan", async (req, res) => {
   try {
@@ -559,7 +603,11 @@ app.post("/api/ai/plan", async (req, res) => {
     const candidateKeys = resolveCandidateKeys(geminiKeys || apiKeys || apiKey);
     const targetCode = scope === "selection" && selectedText ? selectedText : code;
 
-    const multiFileContext = buildProjectContext(projectFiles, activeFilePath, 60000);
+    const multiFileContext = buildProjectContext(projectFiles, activeFilePath, calculateCodeCharBudget(model));
+
+    const targetMarkerInstruction = `\n\nQuando, ao longo da conversa, você identificar com clareza que a alteração pedida pelo usuário precisa acontecer dentro de UMA função, componente ou classe específica e nomeável de UM arquivo específico do projeto (não peça isso se a mudança for espalhada por múltiplos lugares ou não tiver um alvo único claro), inclua, na ÚLTIMA linha da sua resposta, e somente nesse caso, uma marcação neste formato exato, substituindo os valores entre aspas pelos valores reais:
+[[ALVO_EDICAO: arquivo="caminho/do/arquivo.ext" nome="nomeDaFuncaoOuComponenteOuClasse"]]
+Não explique essa marcação para o usuário, não a mencione na conversa, apenas inclua a linha exatamente nesse formato quando aplicável. Se não houver um alvo único e claro, não inclua marcação nenhuma.`;
 
     let planSystemPrompt = "";
     if (multiFileContext.hasMultiFiles) {
@@ -572,6 +620,7 @@ ${multiFileContext.contextText}`;
       if (scope === "selection" && selectedText) {
         planSystemPrompt += `\n\nTrecho específico selecionado pelo usuário no arquivo ativo para referência:\n\`\`\`${language || ""}\n${selectedText}\n\`\`\``;
       }
+      planSystemPrompt += targetMarkerInstruction;
     } else {
       planSystemPrompt = `Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.
 
@@ -579,7 +628,7 @@ Linguagem do projeto: ${language || "desconhecida"}
 Contexto de código atual para referência:
 \`\`\`${language || ""}
 ${targetCode ? targetCode.slice(0, 15000) : "// Arquivo em branco"}
-\`\`\``;
+\`\`\`${targetMarkerInstruction}`;
     }
 
     const promptParts: any[] = [];
@@ -670,7 +719,9 @@ app.post("/api/ai/edit", async (req, res) => {
     }
 
     const candidateKeys = resolveCandidateKeys(geminiKeys || apiKeys || apiKey);
-    const multiFileContext = buildProjectContext(projectFiles, activeFilePath, 60000);
+    const sourceForOutput = (scope === 'selection' && selectedText) ? selectedText : code;
+    const outputTokenBudget = calculateOutputTokenBudget(sourceForOutput, model);
+    const multiFileContext = buildProjectContext(projectFiles, activeFilePath, calculateCodeCharBudget(model, outputTokenBudget));
 
     // Handle code explanation intent
     if (intent === "explain") {
@@ -760,9 +811,6 @@ Arquivo ativo: ${activeFilePath || "arquivo ativo"}
 
 ${multiFileContext.contextText}
 
---- CONTEXTO DO ARQUIVO ATIVO COMPLETO (${activeFilePath || "arquivo ativo"}) ---
-${code}
-
 --- TRECHO SELECIONADO A SER MODIFICADO NO ARQUIVO ATIVO ---
 ${selectedText}
 
@@ -783,9 +831,6 @@ REGRAS CRÍTICAS:
 5. Mantenha exatamente a indentação e o estilo necessários para se encaixar de forma limpa no código ao redor.
 
 Linguagem: ${language || "desconhecida/mista"}
-
---- CONTEXTO DO ARQUIVO COMPLETO (APENAS PARA REFERÊNCIA) ---
-${code}
 
 --- TRECHO SELECIONADO A SER MODIFICADO ---
 ${selectedText}
@@ -872,9 +917,19 @@ Devolva exatamente o código completo atualizado agora:`;
               contents: [{ role: "user", parts }],
               config: {
                 temperature: 0.2,
+                maxOutputTokens: outputTokenBudget,
+                thinkingConfig: {
+                  thinkingLevel: "low" as any,
+                },
               },
             });
-            return response.text || "";
+            const responseText = response.text || "";
+            if (!responseText.trim()) {
+              throw new Error(
+                "A IA retornou uma resposta vazia, possivelmente por falta de espaço de saída disponível após o raciocínio do modelo. Tente novamente ou aumente o orçamento de saída nas configurações."
+              );
+            }
+            return responseText;
           }
         );
         return { text, actualModel };

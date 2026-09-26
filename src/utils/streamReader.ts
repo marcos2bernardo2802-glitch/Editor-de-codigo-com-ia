@@ -100,12 +100,23 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
     } catch {}
 
     const fullDetail = parsedMessage || errorSnippet;
+    const isHtmlError =
+      fullDetail.includes('página HTML') ||
+      fullDetail.includes('<!doctype') ||
+      fullDetail.includes('<html') ||
+      fullDetail.includes('Cannot POST') ||
+      fullDetail.includes('Cannot GET');
+
     const isModelNotFound =
-      status === 404 ||
+      !isHtmlError &&
       /model.*not found|not found.*model|does not exist|code['"]?\s*:\s*['"]?model_not_found/i.test(fullDetail);
 
     if (isModelNotFound) {
       throw new Error(`MODEL_NOT_FOUND (HTTP ${status}): ${fullDetail || 'Modelo não encontrado no servidor.'}`);
+    }
+
+    if (status === 404) {
+      throw new Error(`ENDPOINT_NOT_FOUND (HTTP 404): ${fullDetail || 'Endpoint não encontrado. Verifique se a URL do Colab/ngrok está correta.'}`);
     }
 
     if (parsedMessage) {
