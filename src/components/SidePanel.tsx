@@ -214,7 +214,7 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
   const handleTransferToExecution = (planText: string) => {
     onChangeInteractionMode('execute');
-    onChangeInstruction(`Implemente as seguintes diretrizes planejadas:\n${planText.slice(0, 300)}...`);
+    onChangeInstruction(`Implemente as seguintes diretrizes planejadas:\n${planText}`);
     if (textareaRef.current) {
       textareaRef.current.focus();
     }

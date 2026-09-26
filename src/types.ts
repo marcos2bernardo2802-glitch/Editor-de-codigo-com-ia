@@ -174,3 +174,9 @@ export interface DiagnosticItem {
   source: string;
   suggestedPrompt: string;
 }
+
+export interface ChatHistoryItem {
+  role: 'user' | 'assistant';
+  mode?: 'plan' | 'execute';
+  text: string;
+}

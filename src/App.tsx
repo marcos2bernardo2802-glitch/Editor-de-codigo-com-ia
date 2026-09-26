@@ -23,6 +23,7 @@ import {
   normalizeFilePath,
   extractFileNameFromPath,
   buildProjectContextPrompt,
+  buildChatHistoryPayload,
 } from './utils/workspace';
 import { fillTemplate, getByPath } from './utils/templateEngine';
 import { readAiStream, cleanCodeOutput } from './utils/streamReader';
@@ -1350,6 +1351,7 @@ ${userPromptText}`
         }))
       : undefined;
 
+    const chatHistoryPayload = buildChatHistoryPayload(messages, 10);
     const multiFileContext = buildProjectContextPrompt(projectFilesPayload, activeFilePath, 60000);
 
     try {
@@ -1377,6 +1379,7 @@ ${userPromptText}`
                 geminiKeys: config.geminiKeys || [],
                 projectFiles: projectFilesPayload,
                 activeFilePath,
+                chatHistory: chatHistoryPayload,
               }),
             });
 
@@ -1393,6 +1396,7 @@ ${userPromptText}`
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
                 signal: abortController.signal,
+                chatHistory: chatHistoryPayload,
               });
               planText = fallback.text;
             } else {
@@ -1420,6 +1424,7 @@ ${userPromptText}`
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
                 signal: abortController.signal,
+                chatHistory: chatHistoryPayload,
               });
               planText = fallback.text;
             } else {
@@ -1671,6 +1676,7 @@ ${effectiveInstruction}`
                 geminiKeys: config.geminiKeys || [],
                 projectFiles: projectFilesPayload,
                 activeFilePath,
+                chatHistory: chatHistoryPayload,
               }),
             });
 
@@ -1687,6 +1693,7 @@ ${effectiveInstruction}`
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
                 signal: abortController.signal,
+                chatHistory: chatHistoryPayload,
               });
               returnedSnippetOrCode = fallback.text;
             } else {
@@ -1714,6 +1721,7 @@ ${effectiveInstruction}`
                 activeFilePath,
                 images: activeModelAcceptsVision && imagesToSend.length > 0 ? imagesToSend : undefined,
                 signal: abortController.signal,
+                chatHistory: chatHistoryPayload,
               });
               returnedSnippetOrCode = fallback.text;
             } else {

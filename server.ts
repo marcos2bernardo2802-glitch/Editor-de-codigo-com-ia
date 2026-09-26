@@ -440,6 +440,23 @@ function cleanCodeOutput(rawText: string): string {
   return cleaned.trim();
 }
 
+interface ChatHistoryEntry {
+  role: 'user' | 'assistant';
+  mode?: 'plan' | 'execute';
+  text: string;
+}
+
+function formatChatHistoryBlock(chatHistory: any): string {
+  if (!Array.isArray(chatHistory) || chatHistory.length === 0) return "";
+  const recent = chatHistory.slice(-10);
+  const lines = recent.map((item: ChatHistoryEntry) => {
+    const modeLabel = item.mode === "execute" ? "[Execução]" : "[Planejamento]";
+    const roleLabel = item.role === "user" ? "Usuário" : "Assistente";
+    return `${modeLabel} ${roleLabel}: ${item.text || ""}`;
+  });
+  return `HISTÓRICO RECENTE DA CONVERSA (para contexto, não repita nem responda a essas mensagens antigas):\n${lines.join("\n")}\n\n`;
+}
+
 interface IncomingProjectFile {
   path: string;
   language?: string;
@@ -593,6 +610,7 @@ app.post("/api/ai/plan", async (req, res) => {
       apiKeys,
       projectFiles,
       activeFilePath,
+      chatHistory = [],
     } = req.body;
 
     const userText = (instruction || message || customPrompt || "").trim();
@@ -604,6 +622,7 @@ app.post("/api/ai/plan", async (req, res) => {
     const targetCode = scope === "selection" && selectedText ? selectedText : code;
 
     const multiFileContext = buildProjectContext(projectFiles, activeFilePath, calculateCodeCharBudget(model));
+    const historyBlock = formatChatHistoryBlock(chatHistory);
 
     const targetMarkerInstruction = `\n\nQuando, ao longo da conversa, você identificar com clareza que a alteração pedida pelo usuário precisa acontecer dentro de UMA função, componente ou classe específica e nomeável de UM arquivo específico do projeto (não peça isso se a mudança for espalhada por múltiplos lugares ou não tiver um alvo único claro), inclua, na ÚLTIMA linha da sua resposta, e somente nesse caso, uma marcação neste formato exato, substituindo os valores entre aspas pelos valores reais:
 [[ALVO_EDICAO: arquivo="caminho/do/arquivo.ext" nome="nomeDaFuncaoOuComponenteOuClasse"]]
@@ -629,6 +648,10 @@ Contexto de código atual para referência:
 \`\`\`${language || ""}
 ${targetCode ? targetCode.slice(0, 15000) : "// Arquivo em branco"}
 \`\`\`${targetMarkerInstruction}`;
+    }
+
+    if (historyBlock) {
+      planSystemPrompt += `\n\n${historyBlock}`;
     }
 
     const promptParts: any[] = [];
@@ -709,6 +732,7 @@ app.post("/api/ai/edit", async (req, res) => {
       apiKeys,
       projectFiles,
       activeFilePath,
+      chatHistory = [],
     } = req.body;
 
     if (!code && code !== "" && !selectedText) {
@@ -722,6 +746,7 @@ app.post("/api/ai/edit", async (req, res) => {
     const sourceForOutput = (scope === 'selection' && selectedText) ? selectedText : code;
     const outputTokenBudget = calculateOutputTokenBudget(sourceForOutput, model);
     const multiFileContext = buildProjectContext(projectFiles, activeFilePath, calculateCodeCharBudget(model, outputTokenBudget));
+    const historyBlock = formatChatHistoryBlock(chatHistory);
 
     // Handle code explanation intent
     if (intent === "explain") {
@@ -886,6 +911,10 @@ ${instruction}
 
 Devolva exatamente o código completo atualizado agora:`;
       }
+    }
+
+    if (historyBlock) {
+      prompt = `${historyBlock}${prompt}`;
     }
 
     const { result, usedKeyMask } = await executeWithGeminiFailover(

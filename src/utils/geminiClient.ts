@@ -1,5 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
 
+export interface ChatHistoryItem {
+  role: 'user' | 'assistant';
+  mode?: 'plan' | 'execute';
+  text: string;
+}
+
 export interface GeminiCallOptions {
   instruction: string;
   code?: string;
@@ -12,6 +18,7 @@ export interface GeminiCallOptions {
   selectedText?: string;
   images?: { base64: string; mimeType: string }[];
   signal?: AbortSignal;
+  chatHistory?: ChatHistoryItem[];
 }
 
 export async function callGeminiClientDirect(options: GeminiCallOptions): Promise<{ text: string; model: string }> {
@@ -27,6 +34,7 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
     selectedText,
     images = [],
     signal,
+    chatHistory = [],
   } = options;
 
   if (signal?.aborted) {
@@ -64,6 +72,16 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
     context += `\nTrecho selecionado:\n\`\`\`${language}\n${selectedText}\n\`\`\``;
   }
 
+  let historyBlock = '';
+  if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+    const formattedLines = chatHistory.map((item) => {
+      const modeLabel = item.mode === 'execute' ? '[Execução]' : '[Planejamento]';
+      const roleLabel = item.role === 'user' ? 'Usuário' : 'Assistente';
+      return `${modeLabel} ${roleLabel}: ${item.text}`;
+    });
+    historyBlock = `\n\nHISTÓRICO RECENTE DA CONVERSA (para contexto, não repita nem responda a essas mensagens antigas):\n${formattedLines.join('\n')}\n`;
+  }
+
   const promptParts: any[] = [];
   for (const img of images) {
     if (img.base64) {
@@ -77,7 +95,7 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
   }
 
   promptParts.push({
-    text: `${systemPrompt}\n\n${context}\n\nMensagem do Usuário:\n"${instruction}"`,
+    text: `${systemPrompt}${historyBlock}\n\n${context}\n\nMensagem do Usuário:\n"${instruction}"`,
   });
 
   let lastError: any = null;

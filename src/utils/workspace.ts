@@ -1,4 +1,4 @@
-import { ProjectFile, SupportedLanguage } from '../types';
+import { ProjectFile, SupportedLanguage, ChatMessage, ChatHistoryItem } from '../types';
 
 export function normalizeFilePath(inputPath: string): string {
   let cleaned = inputPath.trim().replace(/\\/g, '/');
@@ -320,5 +320,39 @@ export function buildProjectContextPrompt(
   const contextText = `${treeHeader}\n\nCONTEÚDO DOS ARQUIVOS DO PROJETO:\n${includedFileBlocks.join('\n\n')}${warningSection ? `\n\n${warningSection}` : ''}`;
 
   return { hasMultiFiles: true, contextText };
+}
+
+export function buildChatHistoryPayload(messages: ChatMessage[], limit = 10): ChatHistoryItem[] {
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+
+  // Pega as mensagens que não estejam em streaming ativo
+  const completed = messages.filter((m) => !m.streaming);
+  const sliced = completed.slice(-limit);
+
+  const payload: ChatHistoryItem[] = [];
+  for (const msg of sliced) {
+    if (msg.type === 'instruction') {
+      payload.push({
+        role: 'user',
+        mode: msg.mode || 'plan',
+        text: (msg.text || '').trim(),
+      });
+    } else if (msg.type === 'explanation') {
+      payload.push({
+        role: 'assistant',
+        mode: msg.mode || 'plan',
+        text: (msg.text || '').trim(),
+      });
+    } else if (msg.type === 'proposal') {
+      payload.push({
+        role: 'assistant',
+        mode: msg.mode || 'execute',
+        text: `Alteração de código aplicada (escopo: ${msg.scope || 'full'})`,
+      });
+    }
+    // Ignorar type === 'error' ou 'info' ou 'chat' não suportados, e nunca incluir msg.thinking
+  }
+
+  return payload;
 }
 

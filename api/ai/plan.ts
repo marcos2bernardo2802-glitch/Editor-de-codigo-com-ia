@@ -26,6 +26,7 @@ export default async function handler(req: any, res: any) {
       apiKey,
       projectFiles = [],
       activeFilePath,
+      chatHistory = [],
     } = req.body || {};
 
     const userText = instruction || message;
@@ -52,6 +53,17 @@ export default async function handler(req: any, res: any) {
       'Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. ' +
       'Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, ' +
       'responda de forma direta e conversacional. Só estruture a resposta como um plano formal quando o usuário solicitar explicitamente.';
+
+    let historyBlock = '';
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      const recent = chatHistory.slice(-10);
+      const lines = recent.map((item: any) => {
+        const modeLabel = item.mode === 'execute' ? '[Execução]' : '[Planejamento]';
+        const roleLabel = item.role === 'user' ? 'Usuário' : 'Assistente';
+        return `${modeLabel} ${roleLabel}: ${item.text || ''}`;
+      });
+      historyBlock = `\n\nHISTÓRICO RECENTE DA CONVERSA (para contexto, não repita nem responda a essas mensagens antigas):\n${lines.join('\n')}\n`;
+    }
 
     let context = '';
     if (Array.isArray(projectFiles) && projectFiles.length > 0) {
@@ -80,7 +92,7 @@ export default async function handler(req: any, res: any) {
     }
 
     promptParts.push({
-      text: `${planSystemPrompt}\n\n${context}\n\nMensagem do Usuário (Planejamento):\n"${userText}"`,
+      text: `${planSystemPrompt}${historyBlock}\n\n${context}\n\nMensagem do Usuário (Planejamento):\n"${userText}"`,
     });
 
     let lastError: any = null;

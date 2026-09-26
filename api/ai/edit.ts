@@ -27,6 +27,7 @@ export default async function handler(req: any, res: any) {
       apiKeys = [],
       projectFiles = [],
       activeFilePath,
+      chatHistory = [],
     } = req.body || {};
 
     if (!code && code !== '' && !selectedText) {
@@ -49,6 +50,17 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({
         error: 'Nenhuma chave Gemini informada. Configure suas chaves em Configurações > Gemini.',
       });
+    }
+
+    let historyBlock = '';
+    if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+      const recent = chatHistory.slice(-10);
+      const lines = recent.map((item: any) => {
+        const modeLabel = item.mode === 'execute' ? '[Execução]' : '[Planejamento]';
+        const roleLabel = item.role === 'user' ? 'Usuário' : 'Assistente';
+        return `${modeLabel} ${roleLabel}: ${item.text || ''}`;
+      });
+      historyBlock = `\n\nHISTÓRICO RECENTE DA CONVERSA (para contexto, não repita nem responda a essas mensagens antigas):\n${lines.join('\n')}\n`;
     }
 
     let systemPrompt = '';
@@ -91,7 +103,7 @@ export default async function handler(req: any, res: any) {
     }
 
     promptParts.push({
-      text: `${systemPrompt}\n\n${context}\n\nInstrução:\n"${instruction}"`,
+      text: `${systemPrompt}${historyBlock}\n\n${context}\n\nInstrução:\n"${instruction}"`,
     });
 
     let lastError: any = null;
