@@ -624,10 +624,6 @@ app.post("/api/ai/plan", async (req, res) => {
     const multiFileContext = buildProjectContext(projectFiles, activeFilePath, calculateCodeCharBudget(model));
     const historyBlock = formatChatHistoryBlock(chatHistory);
 
-    const targetMarkerInstruction = `\n\nQuando, ao longo da conversa, você identificar com clareza que a alteração pedida pelo usuário precisa acontecer dentro de UMA função, componente ou classe específica e nomeável de UM arquivo específico do projeto (não peça isso se a mudança for espalhada por múltiplos lugares ou não tiver um alvo único claro), inclua, na ÚLTIMA linha da sua resposta, e somente nesse caso, uma marcação neste formato exato, substituindo os valores entre aspas pelos valores reais:
-[[ALVO_EDICAO: arquivo="caminho/do/arquivo.ext" nome="nomeDaFuncaoOuComponenteOuClasse"]]
-Não explique essa marcação para o usuário, não a mencione na conversa, apenas inclua a linha exatamente nesse formato quando aplicável. Se não houver um alvo único e claro, não inclua marcação nenhuma.`;
-
     let planSystemPrompt = "";
     if (multiFileContext.hasMultiFiles) {
       planSystemPrompt = `Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.
@@ -639,7 +635,6 @@ ${multiFileContext.contextText}`;
       if (scope === "selection" && selectedText) {
         planSystemPrompt += `\n\nTrecho específico selecionado pelo usuário no arquivo ativo para referência:\n\`\`\`${language || ""}\n${selectedText}\n\`\`\``;
       }
-      planSystemPrompt += targetMarkerInstruction;
     } else {
       planSystemPrompt = `Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.
 
@@ -647,7 +642,7 @@ Linguagem do projeto: ${language || "desconhecida"}
 Contexto de código atual para referência:
 \`\`\`${language || ""}
 ${targetCode ? targetCode.slice(0, 15000) : "// Arquivo em branco"}
-\`\`\`${targetMarkerInstruction}`;
+\`\`\``;
     }
 
     if (historyBlock) {

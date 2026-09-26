@@ -34,8 +34,7 @@ import { processDroppedData } from './utils/dropHandler';
 import { processImageFiles } from './utils/imageResize';
 import { getShortModelName } from './utils/modelNames';
 import { callGeminiClientDirect, testGeminiKeysDirect } from './utils/geminiClient';
-import { extractEditTargetMarker } from './utils/editTarget';
-import { locateTargetByName } from './utils/codeLocator';
+import { locateTarget } from './utils/codeLocator';
 import {
   isFileSystemAccessSupported,
   openLocalFolder,
@@ -179,7 +178,7 @@ export default function App() {
   // Selection & AI Scope state (Opcional: Modo Completo ou Modo Seleção)
   const [aiScopeMode, setAiScopeMode] = useState<AIScopeMode>('full');
   const [selection, setSelection] = useState<SelectionRange | null>(null);
-  const [pendingEditTarget, setPendingEditTarget] = useState<{ filePath: string; targetName: string } | null>(null);
+  const [isDetectingSelectionTarget, setIsDetectingSelectionTarget] = useState<boolean>(false);
 
   // History stack for Undo / Redo
   const [history, setHistory] = useState<string[]>([CODE_TEMPLATES[0].code]);
@@ -1167,6 +1166,259 @@ export default function App() {
     }
   };
 
+  // Solicitação do Modo Seleção: se não houver seleção manual e houver histórico, detecta alvo via IA de Planejamento silenciosamente
+  const handleRequestSelectionMode = async () => {
+    console.log('[DEBUG SELECTION TRIGGER] função chamada', { selection, messagesLength: messages.length });
+
+    setAiScopeMode('selection');
+
+    if (selection !== null || messages.length === 0) {
+      return;
+    }
+
+    setIsDetectingSelectionTarget(true);
+
+    try {
+      const chatHistoryPayload = buildChatHistoryPayload(messages, 10);
+      const isProjectMode = workspaceMode === 'project' && files.length > 0;
+      const activeFileObj = files.find((f) => f.id === activeFileId);
+      const activeFilePath = isProjectMode
+        ? (activeFileObj?.path || activeFileObj?.name || 'index.html')
+        : undefined;
+
+      const projectFilesPayload = isProjectMode
+        ? files.map((f) => ({
+            path: f.path || f.name,
+            language: f.language,
+            content: f.id === activeFileId ? code : f.content,
+          }))
+        : undefined;
+
+      const detectionInstruction =
+        'Com base no histórico recente da conversa, avalie se o usuário e o assistente identificaram um único trecho de código claramente identificável — pode ser uma função, um componente, uma classe, um seletor CSS (ex: \'.minha-classe\' ou \'#meu-id\'), um elemento HTML identificável por seu atributo id ou class, ou qualquer outro identificador único e claro que apareça literalmente no código do arquivo.\n' +
+        'Responda ESTRITAMENTE com um objeto JSON válido no formato abaixo, sem nenhum texto antes ou depois:\n' +
+        '{"encontrado": true, "arquivo": "caminho/do/arquivo.ext", "nome": "nomeDaFuncaoOuComponenteOuClasse"}\n' +
+        'Se não houver um alvo único e claro, responda estritamente:\n' +
+        '{"encontrado": false, "arquivo": "", "nome": ""}';
+
+      const planProvider = config.planningProvider || 'colab';
+      let rawResponseText = '';
+
+      if (planProvider === 'gemini') {
+        try {
+          const res = await fetch('/api/ai/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instruction: detectionInstruction,
+              message: detectionInstruction,
+              code,
+              language,
+              model: config.geminiModel || 'gemini-3.8-flash',
+              apiKeys: config.geminiKeys || [],
+              geminiKeys: config.geminiKeys || [],
+              projectFiles: projectFilesPayload,
+              activeFilePath,
+              chatHistory: chatHistoryPayload,
+            }),
+          });
+
+          if (res.status === 404) {
+            const fallback = await callGeminiClientDirect({
+              instruction: detectionInstruction,
+              code,
+              language,
+              model: config.geminiModel || 'gemini-3.8-flash',
+              keys: config.geminiKeys || [],
+              mode: 'plan',
+              projectFiles: projectFilesPayload,
+              activeFilePath,
+              chatHistory: chatHistoryPayload,
+            });
+            rawResponseText = fallback.text;
+          } else if (res.ok) {
+            const data = await safeReadJsonResponse(res);
+            rawResponseText = data.reply || data.text || '';
+          }
+        } catch {
+          if (config.geminiKeys && config.geminiKeys.length > 0) {
+            try {
+              const fallback = await callGeminiClientDirect({
+                instruction: detectionInstruction,
+                code,
+                language,
+                model: config.geminiModel || 'gemini-3.8-flash',
+                keys: config.geminiKeys,
+                mode: 'plan',
+                projectFiles: projectFilesPayload,
+                activeFilePath,
+                chatHistory: chatHistoryPayload,
+              });
+              rawResponseText = fallback.text;
+            } catch {}
+          }
+        }
+      } else {
+        // Colab (ngrok) planning provider
+        const rawEndpoint = (config.endpointUrl || '').trim();
+        if (rawEndpoint) {
+          let targetUrl = rawEndpoint;
+          if (!targetUrl.includes('/v1/') && !targetUrl.includes('/api/')) {
+            targetUrl = targetUrl.replace(/\/+$/, '') + '/v1/chat/completions';
+          }
+
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': '1',
+          };
+          if (config.authToken) headers['Authorization'] = `Bearer ${config.authToken}`;
+
+          const resolveColabModel = (modeModel?: string): string => {
+            const mode = (modeModel || '').trim();
+            const colab = (config.colabModel || '').trim();
+            const detected = Array.isArray(config.detectedModels) ? config.detectedModels : [];
+            if (detected.length > 0) {
+              if (mode && detected.includes(mode)) return mode;
+              if (colab && detected.includes(colab)) return colab;
+              return detected[0];
+            }
+            if (mode && !mode.includes('qwen3-vl-30b-a3b-128k')) return mode;
+            return colab;
+          };
+
+          let modelName = resolveColabModel(config.colabPlanningModel);
+          if (!modelName) {
+            try {
+              const parsed = JSON.parse(config.requestTemplate);
+              if (parsed.model && !parsed.model.includes('mistral')) {
+                modelName = parsed.model;
+              }
+            } catch {}
+          }
+
+          const promptBody = {
+            model: modelName || 'default',
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'Você é um assistente de análise de contexto arquitetural. Analise o histórico e responda ESTRITAMENTE com o JSON solicitado.',
+              },
+              ...chatHistoryPayload.map((item) => ({
+                role: item.role,
+                content: item.text,
+              })),
+              {
+                role: 'user',
+                content: detectionInstruction,
+              },
+            ],
+            temperature: 0.1,
+            stream: false,
+          };
+
+          try {
+            let res: Response;
+            if (config.useProxy) {
+              try {
+                res = await fetch('/api/proxy', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    url: targetUrl,
+                    headers,
+                    body: promptBody,
+                  }),
+                });
+                if (res.status === 404) {
+                  res = await fetch(targetUrl, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(promptBody),
+                  });
+                }
+              } catch {
+                res = await fetch(targetUrl, {
+                  method: 'POST',
+                  headers,
+                  body: JSON.stringify(promptBody),
+                });
+              }
+            } else {
+              res = await fetch(targetUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(promptBody),
+              });
+            }
+
+            if (res.ok) {
+              const data = await safeReadJsonResponse(res);
+              rawResponseText =
+                data.choices?.[0]?.message?.content ||
+                data.response ||
+                data.text ||
+                '';
+            }
+          } catch {}
+        }
+      }
+
+      console.log('[DEBUG SELECTION TRIGGER] resposta bruta da IA:', rawResponseText);
+
+      let parsed: any = null;
+      if (rawResponseText) {
+        // Tenta extrair JSON delimitado por { e }
+        const jsonMatch = rawResponseText.match(/\{[\s\S]*?\}/);
+        if (jsonMatch) {
+          try {
+            parsed = JSON.parse(jsonMatch[0]);
+          } catch (parseErr) {
+            parsed = parseErr;
+          }
+        }
+      }
+
+      console.log('[DEBUG SELECTION TRIGGER] resultado do parse:', parsed);
+
+      if (parsed && typeof parsed === 'object' && !(parsed instanceof Error)) {
+        if (parsed.encontrado === true && parsed.nome) {
+          const targetName = String(parsed.nome).trim();
+          const targetFileArg = String(parsed.arquivo || '').trim() || (activeFilePath || 'index.html');
+
+          // No modo arquivo único (workspaceMode !== 'project'), pula a comparação de caminho
+          if (!isProjectMode) {
+            const targetRange = locateTarget(code, targetName, targetFileArg);
+            if (targetRange) {
+              setSelection(targetRange);
+            }
+          } else if (parsed.arquivo) {
+            const normalizedReportedPath = normalizeFilePath(String(parsed.arquivo)).toLowerCase();
+            const activePath = (activeFilePath || activeFileObj?.path || activeFileObj?.name || 'index.html');
+            const normalizedActivePath = normalizeFilePath(activePath).toLowerCase();
+
+            const reportedFileName = extractFileNameFromPath(normalizedReportedPath);
+            const activeFileName = extractFileNameFromPath(normalizedActivePath);
+
+            if (
+              normalizedReportedPath === normalizedActivePath ||
+              reportedFileName === activeFileName
+            ) {
+              const targetRange = locateTarget(code, targetName, targetFileArg);
+              if (targetRange) {
+                setSelection(targetRange);
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Falha silenciosa: o usuário cai no fluxo manual
+    } finally {
+      setIsDetectingSelectionTarget(false);
+    }
+  };
+
   // Send instruction or question to AI (supports Planning Mode vs Execution Mode, and Full Mode vs Selection Mode)
   const handleSendInstruction = async (
     overridePrompt?: string,
@@ -1202,31 +1454,9 @@ export default function App() {
         ? resolveColabModel(config.colabPlanningModel)
         : resolveColabModel(config.colabExecutionModel);
 
-    const currentCode = code;
-
-    // Quando workspaceMode === 'project', enviamos todos os arquivos do projeto e o path do arquivo ativo
-    const isProjectMode = workspaceMode === 'project' && files.length > 0;
-    const activeFileObj = files.find((f) => f.id === activeFileId);
-    const activeFilePath = isProjectMode
-      ? (activeFileObj?.path || activeFileObj?.name || 'index.html')
-      : undefined;
-
-    let autoSelection: SelectionRange | null = null;
-    if (currentMode === 'execute' && pendingEditTarget && !selection) {
-      const activePathNorm = (activeFilePath || '').trim().toLowerCase();
-      const targetPathNorm = pendingEditTarget.filePath.trim().toLowerCase();
-      if (activePathNorm && targetPathNorm && activePathNorm === targetPathNorm) {
-        autoSelection = locateTargetByName(currentCode, pendingEditTarget.targetName);
-      }
-    }
-    if (currentMode === 'execute') {
-      setPendingEditTarget(null);
-    }
-    console.log('[DEBUG AUTO SELECTION]', { pendingEditTarget, autoSelection, activeFilePath });
-
     // Check Selection Mode constraints
     if (currentMode === 'execute' && effectiveScope === 'selection') {
-      if (!autoSelection && (!selection || !selection.text.trim())) {
+      if (!selection || !selection.text.trim()) {
         const infoMsg: ChatMessage = {
           id: `info-${Date.now()}`,
           type: 'error',
@@ -1321,8 +1551,8 @@ ${visionAnalysisText}
 ${userPromptText}`
       : userPromptText;
 
-    const isSelection = (effectiveScope === 'selection' && Boolean(selection)) || Boolean(autoSelection);
-    const capturedSelection = autoSelection || selection;
+    const isSelection = effectiveScope === 'selection' && Boolean(selection);
+    const capturedSelection = selection;
 
     const userMsg: ChatMessage = {
       id: String(Date.now()),
@@ -1342,6 +1572,15 @@ ${userPromptText}`
 
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
+
+    const currentCode = code;
+
+    // Quando workspaceMode === 'project', enviamos todos os arquivos do projeto e o path do arquivo ativo
+    const isProjectMode = workspaceMode === 'project' && files.length > 0;
+    const activeFileObj = files.find((f) => f.id === activeFileId);
+    const activeFilePath = isProjectMode
+      ? (activeFileObj?.path || activeFileObj?.name || 'index.html')
+      : undefined;
 
     const projectFilesPayload = isProjectMode
       ? files.map((f) => ({
@@ -1432,15 +1671,10 @@ ${userPromptText}`
             }
           }
 
-          console.log('[DEBUG PLAN TEXT - GEMINI]', JSON.stringify(planText));
-          const marker = extractEditTargetMarker(planText);
-          console.log('[DEBUG MARKER - GEMINI]', marker);
-          setPendingEditTarget(marker ? { filePath: marker.filePath, targetName: marker.targetName } : null);
-
           const planMsg: ChatMessage = {
             id: `plan-${Date.now()}`,
             type: 'explanation',
-            text: marker ? marker.cleanedText : (planText || 'Sem resposta do assistente de planejamento.'),
+            text: planText || 'Sem resposta do assistente de planejamento.',
             mode: 'plan',
             timestamp: Date.now(),
             provider: `${config.geminiModel || 'Gemini'} (Planejamento)`,
@@ -1540,7 +1774,7 @@ ${effectiveInstruction}`
               {
                 role: 'system',
                 content:
-                  'Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.\n\nQuando, ao longo da conversa, você identificar com clareza que a alteração pedida pelo usuário precisa acontecer dentro de UMA função, componente ou classe específica e nomeável de UM arquivo específico do projeto (não peça isso se a mudança for espalhada por múltiplos lugares ou não tiver um alvo único claro), inclua, na ÚLTIMA linha da sua resposta, e somente nesse caso, uma marcação neste formato exato, substituindo os valores entre aspas pelos valores reais:\n[[ALVO_EDICAO: arquivo="caminho/do/arquivo.ext" nome="nomeDaFuncaoOuComponenteOuClasse"]]\nNão explique essa marcação para o usuário, não a mencione na conversa, apenas inclua a linha exatamente nesse formato quando aplicável. Se não houver um alvo único e claro, não inclua marcação nenhuma.',
+                  'Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.',
               },
               {
                 role: 'user',
@@ -1627,18 +1861,13 @@ ${effectiveInstruction}`
             },
           });
 
-          console.log('[DEBUG PLAN TEXT - COLAB]', JSON.stringify(streamResult.content));
-          const marker = extractEditTargetMarker(streamResult.content || '');
-          console.log('[DEBUG MARKER - COLAB]', marker);
-          setPendingEditTarget(marker ? { filePath: marker.filePath, targetName: marker.targetName } : null);
-
           setMessages((prev) =>
             prev.map((m) =>
               m.id === planMsgId
                 ? {
                     ...m,
                     text:
-                      (marker ? marker.cleanedText : streamResult.content) ||
+                      streamResult.content ||
                       (streamResult.thinking
                         ? '*(Raciocínio concluído sem texto final)*'
                         : 'Sem resposta do assistente de planejamento.'),
@@ -2651,6 +2880,8 @@ ${effectiveInstruction}`;
           // AI Scope & Selection
           aiScopeMode={aiScopeMode}
           onChangeAiScopeMode={setAiScopeMode}
+          onRequestSelectionMode={handleRequestSelectionMode}
+          isDetectingSelectionTarget={isDetectingSelectionTarget}
           selection={selection}
           onClearSelection={() => setSelection(null)}
           onExplainCode={handleExplainCode}

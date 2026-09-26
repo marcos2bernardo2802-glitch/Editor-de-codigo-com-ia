@@ -1,6 +1,7 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
+import { EditorSelection } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
 import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
@@ -110,6 +111,8 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   onOpenVersionHistory,
   checkpointCount = 0,
 }) => {
+  const editorRef = useRef<import('@uiw/react-codemirror').ReactCodeMirrorRef>(null);
+
   // Atalho de teclado Ctrl+B / Cmd+B para alternar a árvore de arquivos no modo projeto
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -123,6 +126,23 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [workspaceMode, onToggleExplorer]);
+
+  // Sincroniza a seleção externa no editor CodeMirror
+  useEffect(() => {
+    const view = editorRef.current?.view;
+    if (!view || !selection) return;
+    const currentSel = view.state.selection.main;
+    if (currentSel.from === selection.from && currentSel.to === selection.to) {
+      return;
+    }
+    const docLength = view.state.doc.length;
+    const from = Math.max(0, Math.min(selection.from, docLength));
+    const to = Math.max(from, Math.min(selection.to, docLength));
+    view.dispatch({
+      selection: EditorSelection.range(from, to),
+      scrollIntoView: true,
+    });
+  }, [selection]);
 
   // Run real-time syntax diagnostics
   const diagnostics = useMemo(() => {
@@ -351,6 +371,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
 
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <CodeMirror
+                    ref={editorRef}
                     value={code}
                     height="100%"
                     theme={theme === 'dark' ? oneDark : githubLight}

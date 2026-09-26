@@ -3,6 +3,20 @@ import { SelectionRange } from '../types';
 
 const SAFETY_MARGIN_LINES = 3;
 
+function buildSelectionFromLineRange(code: string, startLine: number, endLine: number): SelectionRange {
+  const lines = code.split('\n');
+  const fromLine = Math.max(1, startLine - SAFETY_MARGIN_LINES);
+  const toLine = Math.min(lines.length, endLine + SAFETY_MARGIN_LINES);
+  const text = lines.slice(fromLine - 1, toLine).join('\n');
+  const from = lines.slice(0, fromLine - 1).reduce((acc, line) => acc + line.length + 1, 0);
+  const to = from + text.length;
+  return { from, to, text, fromLine, toLine };
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Localiza exatamente onde uma função, componente ou classe está declarada
  * no código de um arquivo utilizando o AST do @babel/parser.
@@ -113,28 +127,88 @@ export function locateTargetByName(code: string, targetName: string): SelectionR
   const matchStartLine = targetNode.loc.start.line;
   const matchEndLine = targetNode.loc.end.line;
 
-  // f) Divide o código em linhas
-  const lines = code.split('\n');
+  return buildSelectionFromLineRange(code, matchStartLine, matchEndLine);
+}
 
-  // g) Calcula margem de segurança
-  const fromLine = Math.max(1, matchStartLine - SAFETY_MARGIN_LINES);
-  const toLine = Math.min(lines.length, matchEndLine + SAFETY_MARGIN_LINES);
+export function locateTargetInCss(code: string, selectorName: string): SelectionRange | null {
+  if (!code || !selectorName?.trim()) return null;
+  const target = selectorName.trim();
+  const regex = new RegExp(escapeRegExp(target) + '\\s*\\{');
+  const match = regex.exec(code);
+  if (!match) return null;
+  const openBraceIndex = code.indexOf('{', match.index);
+  if (openBraceIndex === -1) return null;
+  let depth = 0;
+  let endIndex = -1;
+  for (let i = openBraceIndex; i < code.length; i++) {
+    if (code[i] === '{') depth++;
+    else if (code[i] === '}') {
+      depth--;
+      if (depth === 0) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+  if (endIndex === -1) return null;
+  const startLine = code.slice(0, match.index).split('\n').length;
+  const endLine = code.slice(0, endIndex).split('\n').length;
+  return buildSelectionFromLineRange(code, startLine, endLine);
+}
 
-  // h) Monta o texto do trecho selecionado
-  const text = lines.slice(fromLine - 1, toLine).join('\n');
+export function locateTargetInHtml(code: string, identifier: string): SelectionRange | null {
+  if (!code || !identifier?.trim()) return null;
+  let raw = identifier.trim();
+  if (raw.startsWith('#') || raw.startsWith('.')) raw = raw.slice(1);
+  const openTagMatch = new RegExp(
+    '<([a-zA-Z0-9]+)([^>]*\\b(?:id|class)\\s*=\\s*["\'][^"\']*\\b' + escapeRegExp(raw) + '\\b[^"\']*["\'][^>]*)>'
+  ).exec(code);
+  if (!openTagMatch) return null;
+  const tagName = openTagMatch[1];
+  const startIndex = openTagMatch.index;
+  const combined = new RegExp('<\\/?' + tagName + '(\\s[^>]*)?>', 'gi');
+  combined.lastIndex = startIndex;
+  let depth = 0;
+  let endIndex = -1;
+  let m: RegExpExecArray | null;
+  while ((m = combined.exec(code)) !== null) {
+    if (m[0].startsWith('</')) {
+      depth--;
+      if (depth === 0) {
+        endIndex = m.index + m[0].length;
+        break;
+      }
+    } else {
+      depth++;
+    }
+  }
+  if (endIndex === -1) endIndex = startIndex + openTagMatch[0].length;
+  const startLine = code.slice(0, startIndex).split('\n').length;
+  const endLine = code.slice(0, endIndex).split('\n').length;
+  return buildSelectionFromLineRange(code, startLine, endLine);
+}
 
-  // i) Calcula o deslocamento de caractere "from"
-  const from = lines.slice(0, fromLine - 1).reduce((acc, line) => acc + line.length + 1, 0);
+export function locateTargetByText(code: string, name: string): SelectionRange | null {
+  if (!code || !name?.trim()) return null;
+  const idx = code.indexOf(name.trim());
+  if (idx === -1) return null;
+  const line = code.slice(0, idx).split('\n').length;
+  return buildSelectionFromLineRange(code, line, line);
+}
 
-  // j) Calcula "to"
-  const to = from + text.length;
-
-  // k) Retorna o objeto SelectionRange
-  return {
-    from,
-    to,
-    text,
-    fromLine,
-    toLine,
-  };
+export function locateTarget(code: string, targetName: string, filePath: string): SelectionRange | null {
+  if (!code || !targetName?.trim()) return null;
+  const ext = (filePath || '').split('.').pop()?.toLowerCase() || '';
+  let result: SelectionRange | null = null;
+  if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) {
+    result = locateTargetByName(code, targetName);
+  } else if (ext === 'css') {
+    result = locateTargetInCss(code, targetName);
+  } else if (ext === 'html' || ext === 'htm') {
+    result = locateTargetInHtml(code, targetName);
+  }
+  if (!result) {
+    result = locateTargetByText(code, targetName);
+  }
+  return result;
 }

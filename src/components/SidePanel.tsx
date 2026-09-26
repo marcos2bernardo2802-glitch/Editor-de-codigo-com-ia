@@ -67,6 +67,8 @@ interface SidePanelProps {
   // AI Scope & Selection
   aiScopeMode: AIScopeMode;
   onChangeAiScopeMode: (mode: AIScopeMode) => void;
+  onRequestSelectionMode: () => void;
+  isDetectingSelectionTarget: boolean;
   selection: SelectionRange | null;
   onClearSelection: () => void;
   onExplainCode?: () => void;
@@ -105,6 +107,8 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   activeFullModelInfo,
   aiScopeMode,
   onChangeAiScopeMode,
+  onRequestSelectionMode,
+  isDetectingSelectionTarget,
   selection,
   onClearSelection,
   onExplainCode,
@@ -601,16 +605,30 @@ export const SidePanel: React.FC<SidePanelProps> = ({
             <button
               id="sideBtnScopeSelection"
               type="button"
-              onClick={() => onChangeAiScopeMode('selection')}
+              onClick={onRequestSelectionMode}
+              disabled={isDetectingSelectionTarget}
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] transition-colors cursor-pointer ${
                 aiScopeMode === 'selection'
                   ? 'bg-[var(--accent)] text-[#1a1206] font-semibold shadow-2xs'
                   : 'text-[var(--muted)] hover:text-[var(--text)]'
               }`}
-              title="A IA foca exclusivamente no trecho de código selecionado"
+              title={
+                isDetectingSelectionTarget
+                  ? 'Detectando alvo da seleção via conversa...'
+                  : 'A IA foca exclusivamente no trecho de código selecionado'
+              }
             >
-              <Scissors className="w-2.5 h-2.5" />
-              <span>Seleção</span>
+              {isDetectingSelectionTarget ? (
+                <>
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  <span>Buscando...</span>
+                </>
+              ) : (
+                <>
+                  <Scissors className="w-2.5 h-2.5" />
+                  <span>Seleção</span>
+                </>
+              )}
             </button>
           </div>
         </div>
