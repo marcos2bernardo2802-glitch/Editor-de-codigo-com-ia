@@ -1168,8 +1168,6 @@ export default function App() {
 
   // Solicitação do Modo Seleção: se não houver seleção manual e houver histórico, detecta alvo via IA de Planejamento silenciosamente
   const handleRequestSelectionMode = async () => {
-    console.log('[DEBUG SELECTION TRIGGER] função chamada', { selection, messagesLength: messages.length });
-
     setAiScopeMode('selection');
 
     if (selection !== null || messages.length === 0) {
@@ -1364,8 +1362,6 @@ export default function App() {
         }
       }
 
-      console.log('[DEBUG SELECTION TRIGGER] resposta bruta da IA:', rawResponseText);
-
       let parsed: any = null;
       if (rawResponseText) {
         // Tenta extrair JSON delimitado por { e }
@@ -1378,8 +1374,6 @@ export default function App() {
           }
         }
       }
-
-      console.log('[DEBUG SELECTION TRIGGER] resultado do parse:', parsed);
 
       if (parsed && typeof parsed === 'object' && !(parsed instanceof Error)) {
         if (parsed.encontrado === true && parsed.nome) {
