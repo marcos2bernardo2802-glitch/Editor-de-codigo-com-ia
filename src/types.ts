@@ -6,6 +6,8 @@ export type InteractionMode = 'plan' | 'execute';
 
 export type ThemeMode = 'dark' | 'light';
 
+export type AssistantMode = 'basico' | 'avancado';
+
 export type EditorViewMode = 'code' | 'preview' | 'split';
 
 export type AIScopeMode = 'full' | 'selection';
@@ -136,6 +138,7 @@ export interface ChatMessage {
   provider?: string;
   usedKeyMask?: string;
   explanation?: string;
+  changeExplanation?: string;
   thinking?: string;
   streaming?: boolean;
   warning?: string;

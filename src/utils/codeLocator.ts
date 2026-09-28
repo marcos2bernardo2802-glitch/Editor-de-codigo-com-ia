@@ -1,9 +1,11 @@
 import { parse } from '@babel/parser';
 import { SelectionRange } from '../types';
+import { computeLineDiff } from './diff';
+import { groupIntoHunks } from './hunks';
 
 const SAFETY_MARGIN_LINES = 3;
 
-function buildSelectionFromLineRange(code: string, startLine: number, endLine: number): SelectionRange {
+export function buildSelectionFromLineRange(code: string, startLine: number, endLine: number): SelectionRange {
   const lines = code.split('\n');
   const fromLine = Math.max(1, startLine - SAFETY_MARGIN_LINES);
   const toLine = Math.min(lines.length, endLine + SAFETY_MARGIN_LINES);
@@ -211,4 +213,31 @@ export function locateTarget(code: string, targetName: string, filePath: string)
     result = locateTargetByText(code, targetName);
   }
   return result;
+}
+
+export function locateChangedRegion(oldCode: string, newCode: string): SelectionRange | null {
+  if (oldCode === newCode) return null;
+
+  const diffResult = computeLineDiff(oldCode, newCode);
+  const hunks = groupIntoHunks(diffResult.lines, 0);
+
+  let minNewLine: number | null = null;
+  let maxNewLine: number | null = null;
+
+  for (const hunk of hunks) {
+    for (const line of hunk.lines) {
+      if (line.type !== 'rem' && typeof line.newLineNum === 'number') {
+        if (line.type === 'add') {
+          if (minNewLine === null || line.newLineNum < minNewLine) minNewLine = line.newLineNum;
+          if (maxNewLine === null || line.newLineNum > maxNewLine) maxNewLine = line.newLineNum;
+        }
+      }
+    }
+  }
+
+  if (minNewLine === null || maxNewLine === null) {
+    return null;
+  }
+
+  return buildSelectionFromLineRange(newCode, minNewLine, maxNewLine);
 }

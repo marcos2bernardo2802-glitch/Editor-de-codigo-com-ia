@@ -25,6 +25,8 @@ import {
   Code2,
   Eye,
   Columns,
+  RotateCcw,
+  RotateCw,
 } from 'lucide-react';
 import { LivePreviewPane } from './LivePreviewPane';
 import { FileTabBar } from './FileTabBar';
@@ -75,6 +77,15 @@ interface CodeEditorPanelProps {
   onFormatCode?: () => void;
   onOpenVersionHistory?: () => void;
   checkpointCount?: number;
+
+  // Undo / Redo
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+
+  // Runtime error (Modo Básico Auto-fix)
+  onRuntimeError?: (message: string) => void;
 }
 
 export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
@@ -110,6 +121,11 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   onFormatCode,
   onOpenVersionHistory,
   checkpointCount = 0,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
+  onRuntimeError,
 }) => {
   const editorRef = useRef<import('@uiw/react-codemirror').ReactCodeMirrorRef>(null);
 
@@ -289,6 +305,35 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
               <span className="hidden sm:inline">Projeto ({files.length})</span>
             </button>
           </div>
+
+          {/* Desfazer e Refazer ao lado direito do seletor Único/Projeto */}
+          {onUndo && onRedo && (
+            <div className="flex items-center p-0.5 rounded bg-[var(--panel-2)] border border-[var(--border)]">
+              <button
+                id="btnEditorUndo"
+                type="button"
+                disabled={!canUndo}
+                onClick={onUndo}
+                className="p-0.5 rounded text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--muted)] disabled:cursor-not-allowed transition-all cursor-pointer"
+                title="Desfazer (Ctrl+Z)"
+                aria-label="Desfazer"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+
+              <button
+                id="btnEditorRedo"
+                type="button"
+                disabled={!canRedo}
+                onClick={onRedo}
+                className="p-0.5 rounded text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)] disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--muted)] disabled:cursor-not-allowed transition-all cursor-pointer"
+                title="Refazer (Ctrl+Y)"
+                aria-label="Refazer"
+              >
+                <RotateCw className="w-3 h-3" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Right: Code stats info */}
@@ -433,6 +478,7 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
                   activeFileId={activeFileId}
                   onSelectFile={onSelectFile}
                   theme={theme}
+                  onRuntimeError={onRuntimeError}
                 />
               </div>
             )}

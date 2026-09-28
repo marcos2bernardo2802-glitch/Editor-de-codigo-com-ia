@@ -5,7 +5,7 @@ import {
   HardDrive,
   FolderCheck,
 } from 'lucide-react';
-import { ConnectionConfig, ThemeMode, EditorViewMode } from '../types';
+import { ConnectionConfig, ThemeMode, EditorViewMode, AssistantMode } from '../types';
 import { MenuBar } from './MenuBar';
 
 interface HeaderProps {
@@ -50,6 +50,8 @@ interface HeaderProps {
   onToggleDiagnostics: () => void;
   viewMode: EditorViewMode;
   onChangeViewMode: (mode: EditorViewMode) => void;
+  assistantMode: AssistantMode;
+  onChangeAssistantMode: (mode: AssistantMode) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -90,6 +92,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleDiagnostics,
   viewMode,
   onChangeViewMode,
+  assistantMode,
+  onChangeAssistantMode,
 }) => {
   return (
     <header className="flex items-center justify-between px-3 sm:px-4 py-1.5 border-b border-[var(--border)] bg-[var(--panel)] shrink-0 select-none min-h-[40px]">
@@ -131,6 +135,8 @@ export const Header: React.FC<HeaderProps> = ({
           onToggleDiagnostics={onToggleDiagnostics}
           viewMode={viewMode}
           onChangeViewMode={onChangeViewMode}
+          assistantMode={assistantMode}
+          onChangeAssistantMode={onChangeAssistantMode}
         />
       </div>
 

@@ -22,6 +22,7 @@ interface LivePreviewPaneProps {
   activeFileId?: string;
   onSelectFile?: (id: string) => void;
   theme?: ThemeMode;
+  onRuntimeError?: (message: string) => void;
 }
 
 type DeviceMode = 'desktop' | 'tablet' | 'mobile';
@@ -33,6 +34,7 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
   activeFileId,
   onSelectFile,
   theme = 'dark',
+  onRuntimeError,
 }) => {
   const [device, setDevice] = useState<DeviceMode>('desktop');
   const [refreshKey, setRefreshKey] = useState<number>(0);
@@ -139,6 +141,9 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
           timestamp: event.data.timestamp || Date.now(),
         };
         setLogs((prev) => [...prev.slice(-100), item]);
+        if (item.type === 'error' && onRuntimeError) {
+          onRuntimeError(item.message);
+        }
       }
     };
 

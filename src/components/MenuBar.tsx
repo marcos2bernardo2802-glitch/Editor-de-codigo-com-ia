@@ -24,7 +24,7 @@ import {
   Eye,
   Columns,
 } from 'lucide-react';
-import { ThemeMode, EditorViewMode } from '../types';
+import { ThemeMode, EditorViewMode, AssistantMode } from '../types';
 
 export interface MenuBarProps {
   // Menu Arquivo
@@ -60,6 +60,10 @@ export interface MenuBarProps {
   onToggleDiagnostics: () => void;
   viewMode: EditorViewMode;
   onChangeViewMode: (mode: EditorViewMode) => void;
+
+  // Menu Modo
+  assistantMode: AssistantMode;
+  onChangeAssistantMode: (mode: AssistantMode) => void;
 }
 
 const LANGUAGE_OPTIONS = [
@@ -102,8 +106,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   onToggleDiagnostics,
   viewMode,
   onChangeViewMode,
+  assistantMode,
+  onChangeAssistantMode,
 }) => {
-  const [openMenu, setOpenMenu] = useState<'arquivo' | 'editar' | 'exibir' | null>(null);
+  const [openMenu, setOpenMenu] = useState<'arquivo' | 'editar' | 'exibir' | 'modo' | null>(null);
   const [showLangSubmenu, setShowLangSubmenu] = useState<boolean>(false);
   const [showFontSizeSubmenu, setShowFontSizeSubmenu] = useState<boolean>(false);
   const menuBarRef = useRef<HTMLDivElement>(null);
@@ -135,13 +141,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     };
   }, []);
 
-  const handleMenuClick = (menu: 'arquivo' | 'editar' | 'exibir') => {
+  const handleMenuClick = (menu: 'arquivo' | 'editar' | 'exibir' | 'modo') => {
     setOpenMenu((prev) => (prev === menu ? null : menu));
     setShowLangSubmenu(false);
     setShowFontSizeSubmenu(false);
   };
 
-  const handleMenuHover = (menu: 'arquivo' | 'editar' | 'exibir') => {
+  const handleMenuHover = (menu: 'arquivo' | 'editar' | 'exibir' | 'modo') => {
     // If a menu is already open, hover switches between menus (standard IDE behavior)
     if (openMenu !== null) {
       setOpenMenu(menu);
@@ -696,15 +702,64 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         </button>
       </div>
 
-      <div className="relative hidden md:block">
+      <div className="relative">
         <button
+          id="menuBtnModo"
           type="button"
-          disabled
-          title="Em breve"
-          className="px-2 py-1 text-[var(--muted)]/50 cursor-not-allowed"
+          onClick={() => handleMenuClick('modo')}
+          onMouseEnter={() => handleMenuHover('modo')}
+          className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+            openMenu === 'modo'
+              ? 'bg-[var(--panel-2)] text-[var(--accent)] font-semibold shadow-2xs'
+              : 'text-[var(--text)] hover:bg-[var(--panel-2)] hover:text-[var(--text)]'
+          }`}
+          aria-expanded={openMenu === 'modo'}
+          aria-haspopup="true"
         >
-          Acessar
+          Modo
         </button>
+
+        {openMenu === 'modo' && (
+          <div className="absolute top-full left-0 mt-1 min-w-[220px] py-1 bg-[var(--panel)] border border-[var(--border)] rounded-lg shadow-xl z-50 animate-in fade-in zoom-in-95 duration-100">
+            <div className="px-3 py-1 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">
+              Modo do Assistente
+            </div>
+
+            <button
+              id="menuItemModeBasico"
+              type="button"
+              onClick={() => {
+                onChangeAssistantMode('basico');
+                closeAll();
+              }}
+              className={`flex items-center justify-between w-full px-3 py-1.5 text-left text-xs transition-colors cursor-pointer ${
+                assistantMode === 'basico'
+                  ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-semibold'
+                  : 'text-[var(--text)] hover:bg-[var(--panel-2)] hover:text-[var(--accent)]'
+              }`}
+            >
+              <span>Básico</span>
+              {assistantMode === 'basico' && <Check className="w-3.5 h-3.5 text-[var(--accent)]" />}
+            </button>
+
+            <button
+              id="menuItemModeAvancado"
+              type="button"
+              onClick={() => {
+                onChangeAssistantMode('avancado');
+                closeAll();
+              }}
+              className={`flex items-center justify-between w-full px-3 py-1.5 text-left text-xs transition-colors cursor-pointer ${
+                assistantMode === 'avancado'
+                  ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-semibold'
+                  : 'text-[var(--text)] hover:bg-[var(--panel-2)] hover:text-[var(--accent)]'
+              }`}
+            >
+              <span>Avançado</span>
+              {assistantMode === 'avancado' && <Check className="w-3.5 h-3.5 text-[var(--accent)]" />}
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );

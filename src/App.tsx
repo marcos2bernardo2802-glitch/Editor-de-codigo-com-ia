@@ -15,6 +15,7 @@ import {
   InteractionMode,
   AIProvider,
   ChatImageAttachment,
+  AssistantMode,
 } from './types';
 import { CODE_TEMPLATES } from './utils/templates';
 import {
@@ -34,7 +35,9 @@ import { processDroppedData } from './utils/dropHandler';
 import { processImageFiles } from './utils/imageResize';
 import { getShortModelName } from './utils/modelNames';
 import { callGeminiClientDirect, testGeminiKeysDirect } from './utils/geminiClient';
-import { locateTarget } from './utils/codeLocator';
+import { locateTarget, locateChangedRegion } from './utils/codeLocator';
+import { computeLineDiff } from './utils/diff';
+import { groupIntoHunks } from './utils/hunks';
 import {
   isFileSystemAccessSupported,
   openLocalFolder,
@@ -94,6 +97,8 @@ const DEFAULT_CONFIG: ConnectionConfig = {
   responsePath: 'choices[0].message.content',
   useProxy: true,
 };
+
+const AUTOFIX_MAX_ATTEMPTS = 3;
 
 // Safe JSON parser that provides friendly, actionable error messages if a server or ngrok returns HTML
 async function safeReadJsonResponse(res: Response): Promise<any> {
@@ -179,6 +184,12 @@ export default function App() {
   const [aiScopeMode, setAiScopeMode] = useState<AIScopeMode>('full');
   const [selection, setSelection] = useState<SelectionRange | null>(null);
   const [isDetectingSelectionTarget, setIsDetectingSelectionTarget] = useState<boolean>(false);
+  const autoFixAttemptsRef = useRef(0);
+  const autoFixDebounceRef = useRef<any>(null);
+  const autoFixResetTimerRef = useRef<any>(null);
+  const [isAutoFixing, setIsAutoFixing] = useState(false);
+  const [autoFixGaveUp, setAutoFixGaveUp] = useState(false);
+  const [explainingMsgId, setExplainingMsgId] = useState<string | null>(null);
 
   // History stack for Undo / Redo
   const [history, setHistory] = useState<string[]>([CODE_TEMPLATES[0].code]);
@@ -375,6 +386,10 @@ export default function App() {
     const saved = localStorage.getItem('editor_theme');
     return saved === 'light' ? 'light' : 'dark';
   });
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>(() => {
+    const saved = localStorage.getItem('genia_assistant_mode');
+    return saved === 'avancado' ? 'avancado' : 'basico';
+  });
 
   // Chat Panel Resizing State (Desktop)
   const [chatWidth, setChatWidth] = useState<number>(() => {
@@ -462,6 +477,10 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('editor_theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('genia_assistant_mode', assistantMode);
+  }, [assistantMode]);
 
   const handleToggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
@@ -1164,6 +1183,244 @@ export default function App() {
         message: `Falha ao conectar: ${err.message}. Certifique-se de que a sessão do Colab está rodando e o ngrok está ativo.`,
       };
     }
+  };
+
+  const handleExplainChange = async (msgId: string) => {
+    if (explainingMsgId) return;
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx === -1) return;
+    const proposal = messages[idx];
+    if (proposal.oldCode === undefined || proposal.newCode === undefined) return;
+
+    // Pedido original do usuário: última mensagem 'instruction' antes da proposta
+    let userRequest = '';
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].type === 'instruction') {
+        userRequest = messages[i].text || '';
+        break;
+      }
+    }
+
+    // Monta o diff compacto (cobre todas as mudanças, mesmo espalhadas)
+    const diffResult = computeLineDiff(proposal.oldCode, proposal.newCode);
+    const hunks = groupIntoHunks(diffResult.lines, 3);
+    let diffText = hunks
+      .map((h) =>
+        h.lines
+          .map((l) => (l.type === 'add' ? '+ ' : l.type === 'rem' ? '- ' : '  ') + l.text)
+          .join('\n')
+      )
+      .join('\n...\n');
+    if (diffText.length > 12000) {
+      diffText = diffText.slice(0, 12000) + '\n... (trecho truncado)';
+    }
+
+    const teacherSystemPrompt =
+      'Você é uma professora de programação paciente, simpática e didática, explicando para alguém que está começando e não entende de código. ' +
+      'Você vai receber o pedido original do usuário e as mudanças feitas no código (linhas com "-" foram removidas, linhas com "+" foram adicionadas, linhas sem sinal são só contexto). ' +
+      'Explique, em português do Brasil e com linguagem simples e amigável: 1) o que foi mudado, 2) por que essa mudança atende ao pedido. ' +
+      'Se usar algum termo técnico, explique-o em uma frase curta com um exemplo do dia a dia. ' +
+      'Seja breve (no máximo 3 parágrafos curtos). Só cite trechos curtos de código entre crases quando ajudar. ' +
+      'Não proponha novas mudanças e não reescreva o código.';
+
+    const teacherUserPrompt =
+      `Pedido original do usuário:\n${userRequest || '(não informado)'}\n\n` +
+      `Mudanças feitas no código:\n${diffText}\n\nExplique essas mudanças para o usuário.`;
+
+    setExplainingMsgId(msgId);
+    try {
+      let explanationText = '';
+
+      // 1) Colab primeiro, se estiver configurado
+      const rawEndpoint = (config.endpointUrl || '').trim();
+      if (rawEndpoint) {
+        try {
+          let targetUrl = rawEndpoint;
+          if (!targetUrl.includes('/v1/') && !targetUrl.includes('/api/')) {
+            targetUrl = targetUrl.replace(/\/+$/, '') + '/v1/chat/completions';
+          }
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': '1',
+          };
+          if (config.authToken) headers['Authorization'] = `Bearer ${config.authToken}`;
+
+          const detected = Array.isArray(config.detectedModels) ? config.detectedModels : [];
+          const modeModel = (config.colabPlanningModel || '').trim();
+          const colabCfgModel = (config.colabModel || '').trim();
+          let modelName = colabCfgModel;
+          if (detected.length > 0) {
+            if (modeModel && detected.includes(modeModel)) modelName = modeModel;
+            else if (colabCfgModel && detected.includes(colabCfgModel)) modelName = colabCfgModel;
+            else modelName = detected[0];
+          } else if (modeModel && !modeModel.includes('qwen3-vl-30b-a3b-128k')) {
+            modelName = modeModel;
+          }
+
+          const promptBody = {
+            model: modelName || 'default',
+            messages: [
+              { role: 'system', content: teacherSystemPrompt },
+              { role: 'user', content: teacherUserPrompt },
+            ],
+            temperature: 0.4,
+            stream: false,
+          };
+
+          let res: Response;
+          if (config.useProxy) {
+            try {
+              res = await fetch('/api/proxy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: targetUrl, headers, body: promptBody }),
+              });
+              if (res.status === 404) {
+                res = await fetch(targetUrl, { method: 'POST', headers, body: JSON.stringify(promptBody) });
+              }
+            } catch {
+              res = await fetch(targetUrl, { method: 'POST', headers, body: JSON.stringify(promptBody) });
+            }
+          } else {
+            res = await fetch(targetUrl, { method: 'POST', headers, body: JSON.stringify(promptBody) });
+          }
+
+          if (res.ok) {
+            const data = await safeReadJsonResponse(res);
+            explanationText = data.choices?.[0]?.message?.content || data.response || data.text || '';
+          }
+        } catch {
+          // segue para o fallback Gemini
+        }
+      }
+
+      // 2) Fallback: Gemini (mesmo padrão usado em handleRequestSelectionMode)
+      if (!explanationText.trim()) {
+        const geminiModel = config.geminiModel || 'gemini-3.8-flash';
+        const combinedInstruction = teacherSystemPrompt + '\n\n' + teacherUserPrompt;
+        try {
+          const res = await fetch('/api/ai/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instruction: combinedInstruction,
+              message: combinedInstruction,
+              code: '',
+              language,
+              model: geminiModel,
+              apiKeys: config.geminiKeys || [],
+              geminiKeys: config.geminiKeys || [],
+            }),
+          });
+          if (res.status === 404) {
+            const fallback = await callGeminiClientDirect({
+              instruction: combinedInstruction,
+              code: '',
+              language,
+              model: geminiModel,
+              keys: config.geminiKeys || [],
+              mode: 'plan',
+            });
+            explanationText = fallback.text;
+          } else if (res.ok) {
+            const data = await safeReadJsonResponse(res);
+            explanationText = data.reply || data.text || '';
+          }
+        } catch {
+          if (config.geminiKeys && config.geminiKeys.length > 0) {
+            try {
+              const fallback = await callGeminiClientDirect({
+                instruction: combinedInstruction,
+                code: '',
+                language,
+                model: geminiModel,
+                keys: config.geminiKeys,
+                mode: 'plan',
+              });
+              explanationText = fallback.text;
+            } catch {}
+          }
+        }
+      }
+
+      // Remove eventual raciocínio interno de modelos que emitem <think>
+      explanationText = explanationText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      if (!explanationText) {
+        throw new Error('Nenhuma IA respondeu a tempo. Tente novamente em instantes.');
+      }
+
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, changeExplanation: explanationText } : m))
+      );
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          type: 'error',
+          text: `Não consegui gerar a explicação agora. ${err?.message || ''}`.trim(),
+          timestamp: Date.now(),
+        },
+      ]);
+    } finally {
+      setExplainingMsgId(null);
+    }
+  };
+
+  const runAutoFix = async (errorMessage: string) => {
+    if (assistantMode !== 'basico' || isLoading || isAutoFixing) return;
+    if (autoFixAttemptsRef.current >= AUTOFIX_MAX_ATTEMPTS) {
+      if (!autoFixGaveUp) {
+        setAutoFixGaveUp(true);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `autofix-giveup-${Date.now()}`,
+            type: 'error',
+            text: 'Tentei corrigir um erro de execução automaticamente algumas vezes, mas não consegui resolver. Pode descrever o que deveria acontecer, ou tentar pedir a correção de outro jeito?',
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      return;
+    }
+
+    autoFixAttemptsRef.current += 1;
+    const attemptNumber = autoFixAttemptsRef.current;
+    setIsAutoFixing(true);
+
+    const statusMsgId = `autofix-status-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: statusMsgId,
+        type: 'explanation',
+        text: `🔧 Detectei um erro ao rodar o código. Tentando corrigir automaticamente (tentativa ${attemptNumber} de ${AUTOFIX_MAX_ATTEMPTS})...`,
+        timestamp: Date.now(),
+      },
+    ]);
+
+    const fixPrompt = `[Autocorreção] O código apresentou o seguinte erro ao ser executado no navegador:\n${errorMessage}\n\nCorrija esse erro, preservando o restante do comportamento e da estrutura do código.`;
+
+    try {
+      await handleSendInstruction(fixPrompt, 'full', 'execute');
+    } finally {
+      setMessages((prev) => prev.filter((m) => m.id !== statusMsgId));
+      setIsAutoFixing(false);
+      if (autoFixResetTimerRef.current) clearTimeout(autoFixResetTimerRef.current);
+      autoFixResetTimerRef.current = setTimeout(() => {
+        autoFixAttemptsRef.current = 0;
+        setAutoFixGaveUp(false);
+      }, 15000);
+    }
+  };
+
+  const handleRuntimeError = (errorMessage: string) => {
+    if (assistantMode !== 'basico' || isLoading || isAutoFixing) return;
+    if (autoFixDebounceRef.current) clearTimeout(autoFixDebounceRef.current);
+    autoFixDebounceRef.current = setTimeout(() => {
+      runAutoFix(errorMessage);
+    }, 900);
   };
 
   // Solicitação do Modo Seleção: se não houver seleção manual e houver histórico, detecta alvo via IA de Planejamento silenciosamente
@@ -1979,6 +2236,10 @@ ${effectiveInstruction}`
             };
 
             setMessages((prev) => [...prev, proposalMsg]);
+
+            if (assistantMode === 'basico') {
+              handleApplyDiff(proposalMsg.id, proposalMsg.fullNewCode, proposalMsg.scope);
+            }
           } else {
             const proposalMsg: ChatMessage = {
               id: `prop-${Date.now()}`,
@@ -1996,6 +2257,10 @@ ${effectiveInstruction}`
             };
 
             setMessages((prev) => [...prev, proposalMsg]);
+
+            if (assistantMode === 'basico') {
+              handleApplyDiff(proposalMsg.id, proposalMsg.fullNewCode, proposalMsg.scope);
+            }
           }
 
           setStatus('connected');
@@ -2216,6 +2481,10 @@ ${effectiveInstruction}`;
             setMessages((prev) =>
               prev.map((m) => (m.id === streamMsgId ? proposalMsg : m))
             );
+
+            if (assistantMode === 'basico') {
+              handleApplyDiff(proposalMsg.id, proposalMsg.fullNewCode, proposalMsg.scope);
+            }
           } else {
             const proposalMsg: ChatMessage = {
               id: `prop-${Date.now()}`,
@@ -2236,6 +2505,10 @@ ${effectiveInstruction}`;
             setMessages((prev) =>
               prev.map((m) => (m.id === streamMsgId ? proposalMsg : m))
             );
+
+            if (assistantMode === 'basico') {
+              handleApplyDiff(proposalMsg.id, proposalMsg.fullNewCode, proposalMsg.scope);
+            }
           }
 
           setStatus('connected');
@@ -2356,7 +2629,10 @@ ${effectiveInstruction}`;
   };
 
   // Apply proposed diff
-  const handleApplyDiff = (msgId: string, newCode: string) => {
+  const handleApplyDiff = (msgId: string, newCode: string, scopeOverride?: 'full' | 'selection') => {
+    // Seleciona/destaca o trecho que realmente mudou nesta edição
+    const changedSelection = locateChangedRegion(code, newCode);
+
     setCode(newCode);
     pushHistory(newCode);
 
@@ -2365,12 +2641,12 @@ ${effectiveInstruction}`;
       prev.map((f) => (f.id === activeFileId ? { ...f, content: newCode } : f))
     );
 
-    // Clear active selection to avoid stale highlights
-    setSelection(null);
+    setSelection(changedSelection);
 
     const targetMsg = messages.find((m) => m.id === msgId);
+    const effectiveScopeForCheckpoint = scopeOverride || targetMsg?.scope;
     addCheckpoint({
-      description: `Edição IA: ${targetMsg?.scope === 'selection' ? 'Trecho Selecionado' : 'Arquivo Completo'}`,
+      description: `Edição IA: ${effectiveScopeForCheckpoint === 'selection' ? 'Trecho Selecionado' : 'Arquivo Completo'}`,
       code: newCode,
       source: 'ai',
       fileId: activeFileId,
@@ -2754,6 +3030,8 @@ ${effectiveInstruction}`;
         onToggleDiagnostics={() => setShowDiagnostics(!showDiagnostics)}
         viewMode={viewMode}
         onChangeViewMode={(mode) => setViewMode(mode)}
+        assistantMode={assistantMode}
+        onChangeAssistantMode={setAssistantMode}
       />
 
       {/* Main Content Area (Split layout) */}
@@ -2796,6 +3074,13 @@ ${effectiveInstruction}`;
           onFormatCode={handleFormatCode}
           onOpenVersionHistory={() => setIsVersionHistoryOpen(true)}
           checkpointCount={checkpoints.length}
+          // Desfazer / Refazer
+          canUndo={historyIndex > 0}
+          canRedo={historyIndex < history.length - 1}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          // Modo Básico: Autocorreção de erro em tempo de execução
+          onRuntimeError={handleRuntimeError}
         />
 
         {/* Draggable Divider between Code Editor and AI Chat (Desktop) */}
@@ -2880,6 +3165,9 @@ ${effectiveInstruction}`;
           onClearSelection={() => setSelection(null)}
           onExplainCode={handleExplainCode}
           onCancelInstruction={handleCancelInstruction}
+          assistantMode={assistantMode}
+          onExplainChange={handleExplainChange}
+          explainingMsgId={explainingMsgId}
         />
       </main>
 

@@ -20,6 +20,7 @@ import {
   Paperclip,
   Eye,
   Square,
+  GraduationCap,
 } from 'lucide-react';
 import {
   ChatMessage,
@@ -29,6 +30,7 @@ import {
   AIProvider,
   AVAILABLE_GEMINI_MODELS,
   ChatImageAttachment,
+  AssistantMode,
 } from '../types';
 import { DiffViewer } from './DiffViewer';
 
@@ -80,6 +82,11 @@ interface SidePanelProps {
 
   // Resizable panel width (desktop)
   width?: number;
+
+  // Assistant Mode
+  assistantMode: AssistantMode;
+  onExplainChange: (msgId: string) => void;
+  explainingMsgId: string | null;
 }
 
 export const SidePanel: React.FC<SidePanelProps> = ({
@@ -116,6 +123,9 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   status,
   statusText,
   width,
+  assistantMode,
+  onExplainChange,
+  explainingMsgId,
 }) => {
   const chatLogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -434,6 +444,42 @@ export const SidePanel: React.FC<SidePanelProps> = ({
                       : undefined
                   }
                 />
+
+                {assistantMode === 'basico' && msg.applied && (
+                  <div className="mt-1 p-2.5 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[11.5px] text-[var(--text)] flex flex-col gap-2">
+                    {msg.changeExplanation ? (
+                      <>
+                        <div className="flex items-center gap-1.5 font-semibold text-[var(--accent)]">
+                          <GraduationCap className="w-3.5 h-3.5" />
+                          <span>Explicação da alteração</span>
+                        </div>
+                        <div className="whitespace-pre-wrap leading-relaxed">{msg.changeExplanation}</div>
+                      </>
+                    ) : (
+                      <>
+                        <span>Pronto! Fiz a alteração. Quer que eu explique o que mudei e por quê?</span>
+                        <button
+                          type="button"
+                          onClick={() => onExplainChange(msg.id)}
+                          disabled={explainingMsgId !== null}
+                          className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--accent)] text-[#1a1206] font-semibold text-[11px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {explainingMsgId === msg.id ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Explicando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <GraduationCap className="w-3 h-3" />
+                              <span>Explicar essa alteração</span>
+                            </>
+                          )}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* Aviso / Interrupção */}
                 {msg.warning && (
