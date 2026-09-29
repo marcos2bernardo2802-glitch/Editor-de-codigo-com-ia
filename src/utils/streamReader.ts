@@ -24,6 +24,8 @@ export interface StreamReadResult {
   isDone: boolean;
   interrupted: boolean;
   warning?: string;
+  finishReason?: string;
+  truncated: boolean;
 }
 
 /**
@@ -181,6 +183,7 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
   let accumulatedContent = '';
   let accumulatedThinking = '';
   let isDone = false;
+  let finishReason = '';
 
   try {
     while (true) {
@@ -235,6 +238,14 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
               if (parsed.message.content) accumulatedContent += parsed.message.content;
             }
 
+            if (choice?.finish_reason) {
+              finishReason = String(choice.finish_reason);
+            } else if (parsed.choices?.[0]?.finish_reason) {
+              finishReason = String(parsed.choices[0].finish_reason);
+            } else if (parsed.done_reason) {
+              finishReason = String(parsed.done_reason);
+            }
+
             if (choice?.finish_reason || parsed.done === true) {
               isDone = true;
             }
@@ -246,6 +257,12 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
         else if (line.startsWith('{') && line.endsWith('}')) {
           try {
             const parsed = JSON.parse(line);
+
+            if (parsed.choices?.[0]?.finish_reason) {
+              finishReason = String(parsed.choices[0].finish_reason);
+            } else if (parsed.done_reason) {
+              finishReason = String(parsed.done_reason);
+            }
 
             if (parsed.done === true) {
               isDone = true;
@@ -264,6 +281,11 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
                   }
                   try {
                     const innerParsed = JSON.parse(dataPayload);
+                    if (innerParsed.choices?.[0]?.finish_reason) {
+                      finishReason = String(innerParsed.choices[0].finish_reason);
+                    } else if (innerParsed.done_reason) {
+                      finishReason = String(innerParsed.done_reason);
+                    }
                     const delta = innerParsed.choices?.[0]?.delta;
                     if (delta) {
                       if (delta.thinking) accumulatedThinking += delta.thinking;
@@ -337,12 +359,22 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
             if (delta?.content) accumulatedContent += delta.content;
             if (delta?.thinking) accumulatedThinking += delta.thinking;
             if (delta?.reasoning_content) accumulatedThinking += delta.reasoning_content;
+            if (parsed.choices?.[0]?.finish_reason) {
+              finishReason = String(parsed.choices[0].finish_reason);
+            } else if (parsed.done_reason) {
+              finishReason = String(parsed.done_reason);
+            }
             if (parsed.choices?.[0]?.finish_reason || parsed.done === true) isDone = true;
           } catch {}
         }
       } else if (rest.startsWith('{') && rest.endsWith('}')) {
         try {
           const parsed = JSON.parse(rest);
+          if (parsed.choices?.[0]?.finish_reason) {
+            finishReason = String(parsed.choices[0].finish_reason);
+          } else if (parsed.done_reason) {
+            finishReason = String(parsed.done_reason);
+          }
           if (parsed.done === true) isDone = true;
           if (parsed.message?.content) accumulatedContent += parsed.message.content;
           if (parsed.message?.thinking) accumulatedThinking += parsed.message.thinking;
@@ -360,6 +392,8 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
         isDone: false,
         interrupted: true,
         warning: 'Geração cancelada pelo usuário. O conteúdo parcial foi preservado.',
+        finishReason,
+        truncated: false,
       };
     }
 
@@ -371,6 +405,8 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
         isDone: false,
         interrupted: true,
         warning: `A conexão com o servidor foi interrompida durante o streaming (${streamErr.message || streamErr}). O conteúdo parcial recebido foi preservado.`,
+        finishReason,
+        truncated: false,
       };
     }
 
@@ -392,5 +428,7 @@ export async function readAiStream(options: StreamReadOptions): Promise<StreamRe
     isDone,
     interrupted: !isDone,
     warning,
+    finishReason,
+    truncated: finishReason === 'length',
   };
 }

@@ -448,7 +448,7 @@ interface ChatHistoryEntry {
 
 function formatChatHistoryBlock(chatHistory: any): string {
   if (!Array.isArray(chatHistory) || chatHistory.length === 0) return "";
-  const recent = chatHistory.slice(-10);
+  const recent = chatHistory.slice(-30);
   const lines = recent.map((item: ChatHistoryEntry) => {
     const modeLabel = item.mode === "execute" ? "[Execução]" : "[Planejamento]";
     const roleLabel = item.role === "user" ? "Usuário" : "Assistente";
@@ -947,6 +947,13 @@ Devolva exatamente o código completo atualizado agora:`;
                 },
               },
             });
+            const finishReason = String((response as any)?.candidates?.[0]?.finishReason || "");
+            if (finishReason === "MAX_TOKENS") {
+              const truncatedErr: any = new Error("A resposta da IA foi cortada porque atingiu o limite de tamanho de saída. Nada foi alterado no seu código. Peça uma alteração menor ou divida o pedido em partes.");
+              truncatedErr.status = 422;
+              truncatedErr.truncated = true;
+              throw truncatedErr;
+            }
             const responseText = response.text || "";
             if (!responseText.trim()) {
               throw new Error(
@@ -972,6 +979,7 @@ Devolva exatamente o código completo atualizado agora:`;
     console.error("Erro ao gerar edição com Gemini:", err.message || err);
     return res.status(getValidStatusCode(err.status, 500)).json({
       error: formatUserFriendlyErrorMessage(err),
+      truncated: Boolean(err?.truncated),
     });
   }
 });

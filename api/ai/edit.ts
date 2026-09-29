@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 
+const MAX_CONTEXT_FILE_CHARS = 200000;
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -54,7 +56,7 @@ export default async function handler(req: any, res: any) {
 
     let historyBlock = '';
     if (Array.isArray(chatHistory) && chatHistory.length > 0) {
-      const recent = chatHistory.slice(-10);
+      const recent = chatHistory.slice(-30);
       const lines = recent.map((item: any) => {
         const modeLabel = item.mode === 'execute' ? '[Execução]' : '[Planejamento]';
         const roleLabel = item.role === 'user' ? 'Usuário' : 'Assistente';
@@ -79,10 +81,10 @@ export default async function handler(req: any, res: any) {
     let context = '';
     if (Array.isArray(projectFiles) && projectFiles.length > 0) {
       context += `\nArquivos do projeto (${projectFiles.length}):\n` +
-        projectFiles.map((f: any) => `--- ${f.path || f.name} ---\n${String(f.content || '').slice(0, 5000)}`).join('\n\n');
+        projectFiles.map((f: any) => `--- ${f.path || f.name} ---\n${String(f.content || '').slice(0, MAX_CONTEXT_FILE_CHARS)}`).join('\n\n');
     }
     if (code && !(scope === 'selection' && selectedText)) {
-      context += `\nCódigo original (${activeFilePath || language}):\n\`\`\`${language}\n${String(code).slice(0, 10000)}\n\`\`\``;
+      context += `\nCódigo original (${activeFilePath || language}):\n\`\`\`${language}\n${String(code).slice(0, MAX_CONTEXT_FILE_CHARS)}\n\`\`\``;
     }
     if (selectedText) {
       context += `\nTrecho selecionado:\n\`\`\`${language}\n${String(selectedText)}\n\`\`\``;
@@ -119,6 +121,14 @@ export default async function handler(req: any, res: any) {
           contents: [{ role: 'user', parts: promptParts }],
           config: { temperature: 0.2 },
         });
+
+        const finishReason = String((response as any)?.candidates?.[0]?.finishReason || '');
+        if (finishReason === 'MAX_TOKENS') {
+          return res.status(422).json({
+            error: 'A resposta da IA foi cortada porque atingiu o limite de tamanho de saída. Nada foi alterado no seu código. Peça uma alteração menor ou divida o pedido em partes.',
+            truncated: true,
+          });
+        }
 
         let outputCode = response.text || '';
         // Limpa blocos markdown

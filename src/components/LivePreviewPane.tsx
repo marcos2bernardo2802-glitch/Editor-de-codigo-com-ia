@@ -23,6 +23,9 @@ interface LivePreviewPaneProps {
   onSelectFile?: (id: string) => void;
   theme?: ThemeMode;
   onRuntimeError?: (message: string) => void;
+  pendingFixError?: string | null;
+  onRequestFix?: (message: string) => void;
+  onDismissFix?: () => void;
 }
 
 type DeviceMode = 'desktop' | 'tablet' | 'mobile';
@@ -35,7 +38,13 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
   onSelectFile,
   theme = 'dark',
   onRuntimeError,
+  pendingFixError,
+  onRequestFix,
+  onDismissFix,
 }) => {
+  const onRuntimeErrorRef = useRef(onRuntimeError);
+  onRuntimeErrorRef.current = onRuntimeError;
+
   const [device, setDevice] = useState<DeviceMode>('desktop');
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [showConsole, setShowConsole] = useState<boolean>(false);
@@ -141,8 +150,8 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
           timestamp: event.data.timestamp || Date.now(),
         };
         setLogs((prev) => [...prev.slice(-100), item]);
-        if (item.type === 'error' && onRuntimeError) {
-          onRuntimeError(item.message);
+        if (item.type === 'error') {
+          onRuntimeErrorRef.current?.(item.message);
         }
       }
     };
@@ -304,6 +313,37 @@ export const LivePreviewPane: React.FC<LivePreviewPaneProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Faixa de aviso de erro de execução com botão de correção */}
+      {pendingFixError && (
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-[var(--panel)] border-b border-[var(--border)] text-xs shrink-0 select-none">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <span className="font-semibold text-red-400 shrink-0">
+              Detectei um erro ao rodar o código:
+            </span>
+            <span
+              className="text-[var(--text)] font-mono text-[11px] truncate flex-1"
+              title={pendingFixError}
+            >
+              {pendingFixError}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => onRequestFix?.(pendingFixError)}
+              className="px-2 py-0.5 rounded bg-[var(--accent)] text-[#1a1206] font-semibold text-[11px] hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+            >
+              Corrigir com IA
+            </button>
+            <button
+              onClick={() => onDismissFix?.()}
+              className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] text-[11px] transition-colors cursor-pointer"
+            >
+              Ignorar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Frame Container - ocupa toda a área em Desktop/Padrão */}
       <div

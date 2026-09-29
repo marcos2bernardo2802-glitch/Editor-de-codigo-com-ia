@@ -25,6 +25,9 @@ import {
   extractFileNameFromPath,
   buildProjectContextPrompt,
   buildChatHistoryPayload,
+  CHAT_HISTORY_LIMIT,
+  PROJECT_CONTEXT_CHAR_LIMIT,
+  chatHistoryToOpenAIMessages,
 } from './utils/workspace';
 import { fillTemplate, getByPath } from './utils/templateEngine';
 import { readAiStream, cleanCodeOutput } from './utils/streamReader';
@@ -189,6 +192,16 @@ export default function App() {
   const autoFixResetTimerRef = useRef<any>(null);
   const [isAutoFixing, setIsAutoFixing] = useState(false);
   const [autoFixGaveUp, setAutoFixGaveUp] = useState(false);
+  const autoFixEligibleRef = useRef(false);
+  const [pendingManualError, setPendingManualError] = useState<string | null>(null);
+  const markManualEdit = () => {
+    autoFixEligibleRef.current = false;
+    if (autoFixDebounceRef.current) {
+      clearTimeout(autoFixDebounceRef.current);
+      autoFixDebounceRef.current = null;
+    }
+    setPendingManualError(null);
+  };
   const [explainingMsgId, setExplainingMsgId] = useState<string | null>(null);
 
   // History stack for Undo / Redo
@@ -581,6 +594,7 @@ export default function App() {
   );
 
   const handleUndo = () => {
+    markManualEdit();
     if (historyIndex > 0) {
       const prevIndex = historyIndex - 1;
       setHistoryIndex(prevIndex);
@@ -594,6 +608,7 @@ export default function App() {
   };
 
   const handleRedo = () => {
+    markManualEdit();
     if (historyIndex < history.length - 1) {
       const nextIndex = historyIndex + 1;
       setHistoryIndex(nextIndex);
@@ -607,6 +622,7 @@ export default function App() {
   };
 
   const handleChangeCode = (newVal: string) => {
+    markManualEdit();
     setCode(newVal);
     // Keep active file content updated
     setFiles((prev) =>
@@ -632,6 +648,7 @@ export default function App() {
 
   // Select a file from project tabs
   const handleSelectFile = (fileId: string) => {
+    markManualEdit();
     // Save current editor content to active file first
     setFiles((prev) =>
       prev.map((f) => (f.id === activeFileId ? { ...f, content: code } : f))
@@ -1415,12 +1432,28 @@ export default function App() {
     }
   };
 
+  const runAutoFixRef = useRef(runAutoFix);
+  runAutoFixRef.current = runAutoFix;
+
   const handleRuntimeError = (errorMessage: string) => {
-    if (assistantMode !== 'basico' || isLoading || isAutoFixing) return;
+    if (isLoading || isAutoFixing) return;
     if (autoFixDebounceRef.current) clearTimeout(autoFixDebounceRef.current);
-    autoFixDebounceRef.current = setTimeout(() => {
-      runAutoFix(errorMessage);
-    }, 900);
+    if (autoFixEligibleRef.current && assistantMode === 'basico') {
+      autoFixDebounceRef.current = setTimeout(() => {
+        if (!autoFixEligibleRef.current) return;
+        runAutoFixRef.current(errorMessage);
+      }, 900);
+    } else {
+      autoFixDebounceRef.current = setTimeout(() => {
+        setPendingManualError(errorMessage);
+      }, 1200);
+    }
+  };
+
+  const handleManualFixRequest = (errorMessage: string) => {
+    setPendingManualError(null);
+    const fixPrompt = `[Correção] O código apresentou o seguinte erro ao ser executado no navegador:\n${errorMessage}\n\nCorrija esse erro, preservando o restante do comportamento e da estrutura do código.`;
+    handleSendInstruction(fixPrompt, 'full', 'execute');
   };
 
   // Solicitação do Modo Seleção: se não houver seleção manual e houver histórico, detecta alvo via IA de Planejamento silenciosamente
@@ -1434,7 +1467,7 @@ export default function App() {
     setIsDetectingSelectionTarget(true);
 
     try {
-      const chatHistoryPayload = buildChatHistoryPayload(messages, 10);
+      const chatHistoryPayload = buildChatHistoryPayload(messages, CHAT_HISTORY_LIMIT);
       const isProjectMode = workspaceMode === 'project' && files.length > 0;
       const activeFileObj = files.find((f) => f.id === activeFileId);
       const activeFilePath = isProjectMode
@@ -1841,8 +1874,8 @@ ${userPromptText}`
         }))
       : undefined;
 
-    const chatHistoryPayload = buildChatHistoryPayload(messages, 10);
-    const multiFileContext = buildProjectContextPrompt(projectFilesPayload, activeFilePath, 60000);
+    const chatHistoryPayload = buildChatHistoryPayload(messages, CHAT_HISTORY_LIMIT);
+    const multiFileContext = buildProjectContextPrompt(projectFilesPayload, activeFilePath, PROJECT_CONTEXT_CHAR_LIMIT);
 
     try {
       if (currentMode === 'plan') {
@@ -2027,6 +2060,7 @@ ${effectiveInstruction}`
                 content:
                   'Você é um arquiteto de software e mentor sênior, atuando no modo Planejamento deste app. Converse naturalmente com o usuário, no mesmo tom e tamanho da mensagem dele: se for um cumprimento, uma dúvida rápida ou um comentário solto, responda de forma direta e conversacional, sem montar estrutura nenhuma. Só organize a resposta como um plano de ação formal, em Markdown com etapas, quando o usuário pedir isso claramente (ex: "monta um plano", "como você estruturaria isso", "quais os passos pra fazer X"). Nunca altere o código diretamente nem retorne diffs — este modo é só para conversa e planejamento; a edição real do código acontece no modo Execução.',
               },
+              ...chatHistoryToOpenAIMessages(chatHistoryPayload),
               {
                 role: 'user',
                 content: promptUserContent,
@@ -2179,13 +2213,18 @@ ${effectiveInstruction}`
             } else {
               const data = await safeReadJsonResponse(res);
               if (!res.ok) {
-                throw new Error(data.error || `Erro do servidor: ${res.status}`);
+                const serverErr: any = new Error(data.error || `Erro do servidor: ${res.status}`);
+                if (data.truncated) serverErr.truncated = true;
+                throw serverErr;
               }
               returnedSnippetOrCode = data.code;
               usedKeyMask = data.usedKeyMask;
             }
           } catch (apiErr: any) {
             if (apiErr.name === 'AbortError' || abortController.signal.aborted) {
+              throw apiErr;
+            }
+            if (apiErr.truncated) {
               throw apiErr;
             }
             if (config.geminiKeys && config.geminiKeys.length > 0) {
@@ -2273,8 +2312,12 @@ ${effectiveInstruction}`
 
           let effectiveColabInstruction = effectiveInstruction;
           if (multiFileContext.hasMultiFiles) {
+            const colabExecContext =
+              isSelection && capturedSelection
+                ? multiFileContext
+                : buildProjectContextPrompt(projectFilesPayload, activeFilePath, PROJECT_CONTEXT_CHAR_LIMIT, { omitActiveFileContent: true });
             effectiveColabInstruction = `[CONTEXTO ARQUITETURAL DE TODO O PROJETO (${projectFilesPayload?.length || files.length} arquivos)]:
-${multiFileContext.contextText}
+${colabExecContext.contextText}
 
 [INSTRUÇÃO DE EDIÇÃO]:
 O arquivo que você está editando é o arquivo ativo: "${activeFilePath || 'arquivo ativo'}".
@@ -2289,6 +2332,14 @@ ${effectiveInstruction}`;
               instruction: effectiveColabInstruction,
             });
             body = JSON.parse(filled);
+            if (Array.isArray(body.messages)) {
+              const historyMessages = chatHistoryToOpenAIMessages(chatHistoryPayload);
+              if (historyMessages.length > 0) {
+                const lastUserIdxForHistory = body.messages.map((m: any) => m.role).lastIndexOf('user');
+                const insertAt = lastUserIdxForHistory !== -1 ? lastUserIdxForHistory : body.messages.length;
+                body.messages.splice(insertAt, 0, ...historyMessages);
+              }
+            }
             // If activeColabModel is configured, ensure body.model matches it
             if (activeColabModel) {
               body.model = activeColabModel;
@@ -2443,6 +2494,22 @@ ${effectiveInstruction}`;
             },
           });
 
+          if (abortController.signal.aborted) {
+            const abortErr: any = new Error('Geração cancelada pelo usuário.');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+          }
+          if (streamResult.truncated) {
+            const cutErr: any = new Error('A resposta do modelo no Colab/Kaggle foi cortada porque atingiu o limite de tokens de saída (num_predict). Nada foi alterado no seu código. Peça uma alteração menor ou aumente o num_predict do modelo.');
+            cutErr.truncated = true;
+            throw cutErr;
+          }
+          if (streamResult.interrupted) {
+            const dropErr: any = new Error('A conexão com o servidor caiu antes de a resposta terminar. Nada foi alterado no seu código. Tente novamente.');
+            dropErr.truncated = true;
+            throw dropErr;
+          }
+
           // Extrai o código limpo, removendo raciocínio e blocos markdown
           const extractedCode = cleanCodeOutput(streamResult.content);
 
@@ -2549,6 +2616,16 @@ ${effectiveInstruction}`;
         return;
       }
 
+      if (err?.truncated) {
+        setMessages((prev) => [
+          ...prev,
+          { id: `err-${Date.now()}`, type: 'error', text: err.message, timestamp: Date.now() },
+        ]);
+        setStatus('connected');
+        setStatusText('resposta cortada');
+        return;
+      }
+
       const errMsg = err.message || '';
       const isBackendMissing =
         errMsg.includes('NOT_FOUND') ||
@@ -2630,6 +2707,8 @@ ${effectiveInstruction}`;
 
   // Apply proposed diff
   const handleApplyDiff = (msgId: string, newCode: string, scopeOverride?: 'full' | 'selection') => {
+    autoFixEligibleRef.current = true;
+    setPendingManualError(null);
     // Seleciona/destaca o trecho que realmente mudou nesta edição
     const changedSelection = locateChangedRegion(code, newCode);
 
@@ -2660,6 +2739,8 @@ ${effectiveInstruction}`;
 
   // Sugestão 3: Apply partial diff (hunk-by-hunk) without discarding the proposal completely
   const handleApplyPartialDiff = (msgId: string, updatedCode: string) => {
+    autoFixEligibleRef.current = true;
+    setPendingManualError(null);
     setCode(updatedCode);
     pushHistory(updatedCode);
 
@@ -2678,6 +2759,7 @@ ${effectiveInstruction}`;
 
   // Sugestão Extra: Formatação automática de código
   const handleFormatCode = () => {
+    markManualEdit();
     const formatted = formatCode(code, language);
     if (formatted !== code) {
       setCode(formatted);
@@ -2843,6 +2925,7 @@ ${effectiveInstruction}`;
 
   // Sugestão Extra: Restaurar versão de checkpoint
   const handleRestoreCheckpoint = (cp: VersionCheckpoint) => {
+    markManualEdit();
     setCode(cp.code);
     pushHistory(cp.code);
     setFiles((prev) =>
@@ -2942,6 +3025,7 @@ ${effectiveInstruction}`;
 
   // Clear code in editor
   const handleClearCode = () => {
+    markManualEdit();
     setCode('');
     pushHistory('');
     setFiles((prev) =>
@@ -2952,6 +3036,7 @@ ${effectiveInstruction}`;
 
   // Select template
   const handleSelectTemplate = (template: CodeTemplate) => {
+    markManualEdit();
     setCode(template.code);
     setLanguage(template.language);
     pushHistory(template.code);
@@ -3081,6 +3166,9 @@ ${effectiveInstruction}`;
           onRedo={handleRedo}
           // Modo Básico: Autocorreção de erro em tempo de execução
           onRuntimeError={handleRuntimeError}
+          pendingFixError={pendingManualError}
+          onRequestFix={handleManualFixRequest}
+          onDismissFix={() => setPendingManualError(null)}
         />
 
         {/* Draggable Divider between Code Editor and AI Chat (Desktop) */}

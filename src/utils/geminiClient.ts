@@ -1,5 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 
+const MAX_CONTEXT_FILE_CHARS = 200000;
+
 export interface ChatHistoryItem {
   role: 'user' | 'assistant';
   mode?: 'plan' | 'execute';
@@ -63,10 +65,10 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
   let context = '';
   if (projectFiles.length > 0) {
     context += `\nArquivos do projeto (${projectFiles.length}):\n` +
-      projectFiles.map((f) => `--- ${f.path || f.name} ---\n${f.content.slice(0, 5000)}`).join('\n\n');
+      projectFiles.map((f) => `--- ${f.path || f.name} ---\n${f.content.slice(0, MAX_CONTEXT_FILE_CHARS)}`).join('\n\n');
   }
   if (code) {
-    context += `\nArquivo ativo (${activeFilePath || language}):\n\`\`\`${language}\n${code.slice(0, 10000)}\n\`\`\``;
+    context += `\nArquivo ativo (${activeFilePath || language}):\n\`\`\`${language}\n${code.slice(0, MAX_CONTEXT_FILE_CHARS)}\n\`\`\``;
   }
   if (selectedText) {
     context += `\nTrecho selecionado:\n\`\`\`${language}\n${selectedText}\n\`\`\``;
@@ -152,6 +154,12 @@ export async function callGeminiClientDirect(options: GeminiCallOptions): Promis
       }
 
       const text = response.text || '';
+      const finishReason = String(response?.candidates?.[0]?.finishReason || '');
+      if (mode === 'edit' && finishReason === 'MAX_TOKENS') {
+        const truncatedErr: any = new Error('A resposta da IA foi cortada porque atingiu o limite de tamanho de saída. Nada foi alterado no seu código. Peça uma alteração menor ou divida o pedido em partes.');
+        truncatedErr.truncated = true;
+        throw truncatedErr;
+      }
       return { text, model };
     } catch (err: any) {
       if (err.name === 'AbortError' || signal?.aborted) {

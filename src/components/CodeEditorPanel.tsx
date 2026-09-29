@@ -86,6 +86,9 @@ interface CodeEditorPanelProps {
 
   // Runtime error (Modo Básico Auto-fix)
   onRuntimeError?: (message: string) => void;
+  pendingFixError?: string | null;
+  onRequestFix?: (message: string) => void;
+  onDismissFix?: () => void;
 }
 
 export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
@@ -126,6 +129,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
   onUndo,
   onRedo,
   onRuntimeError,
+  pendingFixError,
+  onRequestFix,
+  onDismissFix,
 }) => {
   const editorRef = useRef<import('@uiw/react-codemirror').ReactCodeMirrorRef>(null);
 
@@ -479,6 +485,9 @@ export const CodeEditorPanel: React.FC<CodeEditorPanelProps> = ({
                   onSelectFile={onSelectFile}
                   theme={theme}
                   onRuntimeError={onRuntimeError}
+                  pendingFixError={pendingFixError}
+                  onRequestFix={onRequestFix}
+                  onDismissFix={onDismissFix}
                 />
               </div>
             )}

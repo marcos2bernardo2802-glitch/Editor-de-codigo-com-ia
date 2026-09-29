@@ -236,6 +236,8 @@ export interface ProjectContextSummary {
   contextText: string;
 }
 
+export const PROJECT_CONTEXT_CHAR_LIMIT = 200000;
+
 /**
  * Constrói o contexto textual de múltiplos arquivos para ser injetado nos prompts da IA (Gemini ou Colab/Ollama).
  * Inclui árvore de caminhos, conteúdo dos arquivos com cabeçalhos e controle de limite de caracteres.
@@ -243,7 +245,8 @@ export interface ProjectContextSummary {
 export function buildProjectContextPrompt(
   files: Array<{ path?: string; name?: string; language?: string; content?: string }> | undefined,
   activeFilePath?: string,
-  maxTotalChars = 60000
+  maxTotalChars = PROJECT_CONTEXT_CHAR_LIMIT,
+  options: { omitActiveFileContent?: boolean } = {}
 ): ProjectContextSummary {
   if (!Array.isArray(files) || files.length <= 1) {
     return { hasMultiFiles: false, contextText: '' };
@@ -270,7 +273,9 @@ export function buildProjectContextPrompt(
   }
 
   const activeFile = files[activeIndex];
-  const activeFileLength = activeFile?.content ? activeFile.content.length : 0;
+  const activeFileLength = options.omitActiveFileContent
+    ? 0
+    : activeFile?.content ? activeFile.content.length : 0;
   let remainingBudget = Math.max(maxTotalChars - activeFileLength, 0);
 
   const includedFileBlocks: string[] = [];
@@ -284,10 +289,16 @@ export function buildProjectContextPrompt(
     const fileContent = typeof file.content === 'string' ? file.content : '';
 
     if (isThisActive) {
-      // O arquivo ativo é sempre incluído por inteiro
-      includedFileBlocks.push(
-        `--- Arquivo: ${filePath} (ARQUIVO ATIVO, FOCO DO USUÁRIO) [${fileLang}] ---\n\`\`\`${fileLang}\n${fileContent}\n\`\`\``
-      );
+      if (options.omitActiveFileContent) {
+        includedFileBlocks.push(
+          `--- Arquivo: ${filePath} (ARQUIVO ATIVO, FOCO DO USUÁRIO) [${fileLang}] ---\n(O conteúdo completo deste arquivo está na seção "CÓDIGO ORIGINAL" desta mesma requisição.)`
+        );
+      } else {
+        // O arquivo ativo é sempre incluído por inteiro
+        includedFileBlocks.push(
+          `--- Arquivo: ${filePath} (ARQUIVO ATIVO, FOCO DO USUÁRIO) [${fileLang}] ---\n\`\`\`${fileLang}\n${fileContent}\n\`\`\``
+        );
+      }
     } else {
       if (remainingBudget >= 200) {
         if (fileContent.length <= remainingBudget) {
@@ -322,7 +333,9 @@ export function buildProjectContextPrompt(
   return { hasMultiFiles: true, contextText };
 }
 
-export function buildChatHistoryPayload(messages: ChatMessage[], limit = 10): ChatHistoryItem[] {
+export const CHAT_HISTORY_LIMIT = 30;
+
+export function buildChatHistoryPayload(messages: ChatMessage[], limit = CHAT_HISTORY_LIMIT): ChatHistoryItem[] {
   if (!Array.isArray(messages) || messages.length === 0) return [];
 
   // Pega as mensagens que não estejam em streaming ativo
@@ -354,5 +367,27 @@ export function buildChatHistoryPayload(messages: ChatMessage[], limit = 10): Ch
   }
 
   return payload;
+}
+
+export function chatHistoryToOpenAIMessages(history: ChatHistoryItem[]): { role: 'user' | 'assistant'; content: string }[] {
+  if (!Array.isArray(history) || history.length === 0) return [];
+
+  const result: { role: 'user' | 'assistant'; content: string }[] = [];
+
+  for (const item of history) {
+    const text = (item.text || '').trim();
+    if (!text) continue;
+
+    if (result.length > 0 && result[result.length - 1].role === item.role) {
+      result[result.length - 1].content += `\n\n${text}`;
+    } else {
+      result.push({
+        role: item.role,
+        content: text,
+      });
+    }
+  }
+
+  return result;
 }
 
