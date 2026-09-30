@@ -113,6 +113,46 @@ export interface ConnectionConfig {
   useProxy: boolean;
 }
 
+export const DEFAULT_CONFIG: ConnectionConfig = {
+  provider: 'gemini',
+  planningProvider: 'colab',
+  executionProvider: 'gemini',
+  geminiModel: 'gemini-3.8-flash',
+  geminiKeys: [],
+  endpointUrl: '',
+  colabModel: '',
+  authToken: '',
+  planningAcceptsImages: false,
+  executionAcceptsImages: false,
+  modelVisionMap: {},
+  visionProvider: 'gemini',
+  visionModel: 'gemini-3.8-flash',
+  colabVisionModel: '',
+  visionPrompt:
+    'Analise esta imagem (um print de tela ou de erro). 1) Transcreva literalmente TODO o texto visível (mensagens de erro, stack traces, nomes de arquivo, números de linha, valores). 2) Descreva o layout e os elementos de interface relevantes. 3) Aponte anomalias visíveis (elementos cortados, sobrepostos, desalinhados, mensagens de erro), sem propor correções. Responda em português do Brasil.',
+  requestTemplate: JSON.stringify(
+    {
+      model: '',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Você é um assistente programador. Retorne APENAS o código modificado puro, sem explicações nem markdown.',
+        },
+        {
+          role: 'user',
+          content: '--- CÓDIGO ORIGINAL ---\n{{code}}\n\n--- INSTRUÇÃO ---\n{{instruction}}',
+        },
+      ],
+      temperature: 0.2,
+    },
+    null,
+    2
+  ),
+  responsePath: 'choices[0].message.content',
+  useProxy: true,
+};
+
 export interface DiffLine {
   type: 'add' | 'rem' | 'same';
   text: string;

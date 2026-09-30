@@ -33,6 +33,8 @@ import {
   AssistantMode,
 } from '../types';
 import { DiffViewer } from './DiffViewer';
+import { ProposalMessageCard } from './chat/ProposalMessageCard';
+import { ExplanationMessageCard } from './chat/ExplanationMessageCard';
 
 interface SidePanelProps {
   messages: ChatMessage[];
@@ -391,198 +393,35 @@ export const SidePanel: React.FC<SidePanelProps> = ({
 
           if (msg.type === 'proposal' && msg.oldCode !== undefined && msg.newCode !== undefined) {
             return (
-              <div key={msg.id} className="flex flex-col gap-1">
-                {/* Cabeçalho da proposta: nome completo apenas no tooltip */}
-                <div
-                  className="flex items-center justify-between text-[11px] text-[var(--muted)] px-1 cursor-default"
-                  title={msg.provider || fullModelTooltip}
-                >
-                  <span className="flex items-center gap-1 font-semibold text-[var(--text)]">
-                    <Sparkles className="w-3 h-3 text-[var(--accent)]" />
-                    <span>Proposta de Edição</span>
-                  </span>
-
-                  <div className="flex items-center gap-1.5">
-                    {msg.usedKeyMask && (
-                      <span
-                        className="inline-flex items-center gap-1 text-[9.5px] px-1.5 py-0.2 rounded bg-[var(--panel-2)] border border-[var(--border)] text-[var(--muted)] font-mono"
-                        title="Chave de API utilizada para esta requisição"
-                      >
-                        <ShieldCheck className="w-2.5 h-2.5 text-[var(--accent)]" />
-                        {msg.usedKeyMask}
-                      </span>
-                    )}
-
-                    {msg.scope === 'selection' && (
-                      <span className="inline-flex items-center gap-1 text-[9.5px] px-1.5 py-0.2 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/30 text-[var(--accent)] font-mono">
-                        <Scissors className="w-2.5 h-2.5" />
-                        L{msg.selectionRange?.fromLine}–L{msg.selectionRange?.toLine}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 7. Diffs recolhidos por padrão, mantendo estado por mensagem */}
-                <DiffViewer
-                  messageId={msg.id}
-                  isExpanded={expandedDiffs[msg.id] ?? false}
-                  onToggleExpand={() =>
-                    setExpandedDiffs((prev) => ({
-                      ...prev,
-                      [msg.id]: !(prev[msg.id] ?? false),
-                    }))
-                  }
-                  oldCode={msg.oldCode}
-                  newCode={msg.newCode}
-                  applied={msg.applied}
-                  discarded={msg.discarded}
-                  onApply={() => onApplyDiff(msg.id, msg.fullNewCode || msg.newCode || '')}
-                  onDiscard={() => onDiscardDiff(msg.id)}
-                  onApplyPartial={
-                    onApplyPartialDiff
-                      ? (updated) => onApplyPartialDiff(msg.id, updated)
-                      : undefined
-                  }
-                />
-
-                {assistantMode === 'basico' && msg.applied && (
-                  <div className="mt-1 p-2.5 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[11.5px] text-[var(--text)] flex flex-col gap-2">
-                    {msg.changeExplanation ? (
-                      <>
-                        <div className="flex items-center gap-1.5 font-semibold text-[var(--accent)]">
-                          <GraduationCap className="w-3.5 h-3.5" />
-                          <span>Explicação da alteração</span>
-                        </div>
-                        <div className="whitespace-pre-wrap leading-relaxed">{msg.changeExplanation}</div>
-                      </>
-                    ) : (
-                      <>
-                        <span>Pronto! Fiz a alteração. Quer que eu explique o que mudei e por quê?</span>
-                        <button
-                          type="button"
-                          onClick={() => onExplainChange(msg.id)}
-                          disabled={explainingMsgId !== null}
-                          className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--accent)] text-[#1a1206] font-semibold text-[11px] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {explainingMsgId === msg.id ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>Explicando...</span>
-                            </>
-                          ) : (
-                            <>
-                              <GraduationCap className="w-3 h-3" />
-                              <span>Explicar essa alteração</span>
-                            </>
-                          )}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* Aviso / Interrupção */}
-                {msg.warning && (
-                  <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10.5px] text-amber-300 flex items-start gap-1.5 leading-relaxed">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
-                    <span>{msg.warning}</span>
-                  </div>
-                )}
-
-                {/* Bloco recolhível de raciocínio interno */}
-                {msg.thinking && (
-                  <details className="text-[10.5px] bg-[var(--panel-2)] border border-[var(--border)] rounded-xl p-2 text-[var(--muted)] group">
-                    <summary className="cursor-pointer font-medium text-[var(--muted)] hover:text-[var(--text)] select-none flex items-center justify-between list-none">
-                      <span className="flex items-center gap-1.5">
-                        <span>🧠</span>
-                        <span>Raciocínio interno ({msg.thinking.length} caracteres)</span>
-                      </span>
-                      <span className="text-[9px] text-[var(--muted)] group-open:rotate-90 transition-transform">▸</span>
-                    </summary>
-                    <div className="mt-1.5 pt-1.5 border-t border-[var(--border)]/50 font-mono text-[9.5px] whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto text-[var(--text)]/80 select-text">
-                      {msg.thinking}
-                    </div>
-                  </details>
-                )}
-              </div>
+              <ProposalMessageCard
+                key={msg.id}
+                msg={msg}
+                fullModelTooltip={fullModelTooltip}
+                isExpanded={expandedDiffs[msg.id] ?? false}
+                onToggleExpand={() =>
+                  setExpandedDiffs((prev) => ({
+                    ...prev,
+                    [msg.id]: !(prev[msg.id] ?? false),
+                  }))
+                }
+                onApplyDiff={(msgId, newCode) => onApplyDiff(msgId, newCode)}
+                onApplyPartialDiff={onApplyPartialDiff}
+                onDiscardDiff={onDiscardDiff}
+                assistantMode={assistantMode}
+                onExplainChange={onExplainChange}
+                explainingMsgId={explainingMsgId}
+              />
             );
           }
 
           if (msg.type === 'explanation') {
-            const rawContent = msg.explanation || msg.text || '';
-
             return (
-              <div
+              <ExplanationMessageCard
                 key={msg.id}
-                className="bg-[var(--panel-2)] border border-[var(--border)] rounded-2xl rounded-bl-xs p-3 text-xs text-[var(--text)] flex flex-col gap-2 shadow-2xs"
-              >
-                {/* Cabeçalho da resposta: menor e mais discreto */}
-                <div
-                  className="flex items-center justify-between border-b border-[var(--border)]/40 pb-1 cursor-default select-none"
-                  title={msg.provider || fullModelTooltip}
-                >
-                  <span className="flex items-center gap-1.5 text-[10px] font-medium text-[var(--muted)]">
-                    <MessageSquare className="w-2.5 h-2.5 text-blue-400/70 shrink-0" />
-                    <span className="tracking-tight text-blue-400/80">Resposta de Planejamento</span>
-                  </span>
-
-                  {msg.usedKeyMask && (
-                    <span
-                      className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.2 rounded bg-[var(--panel)] border border-[var(--border)] text-[var(--muted)] font-mono"
-                      title="Chave de API utilizada"
-                    >
-                      <ShieldCheck className="w-2.5 h-2.5 text-[var(--accent)]" />
-                      {msg.usedKeyMask}
-                    </span>
-                  )}
-                </div>
-
-                {/* Corpo Markdown com cursor pulsante discreto durante streaming */}
-                <div className="text-xs text-[var(--text)] leading-relaxed font-sans prose prose-invert max-w-none space-y-2 selection:bg-[var(--accent)]/30">
-                  <Markdown>{rawContent}</Markdown>
-                  {msg.streaming && (
-                    <span className="inline-block w-1.5 h-3 ml-1 bg-blue-400 animate-pulse align-middle" />
-                  )}
-                </div>
-
-                {/* Aviso / Interrupção */}
-                {msg.warning && (
-                  <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10.5px] text-amber-300 flex items-start gap-1.5 leading-relaxed">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
-                    <span>{msg.warning}</span>
-                  </div>
-                )}
-
-                {/* Bloco discreto de raciocínio */}
-                {msg.thinking && (
-                  <details className="text-[10.5px] bg-[var(--panel)] border border-[var(--border)] rounded-xl p-2 text-[var(--muted)] group">
-                    <summary className="cursor-pointer font-medium text-[var(--muted)] hover:text-[var(--text)] select-none flex items-center justify-between list-none">
-                      <span className="flex items-center gap-1.5">
-                        <span>🧠</span>
-                        <span>Raciocínio interno ({msg.thinking.length} caracteres)</span>
-                      </span>
-                      <span className="text-[9px] text-[var(--muted)] group-open:rotate-90 transition-transform">▸</span>
-                    </summary>
-                    <div className="mt-1.5 pt-1.5 border-t border-[var(--border)]/50 font-mono text-[9.5px] whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto text-[var(--text)]/80 select-text">
-                      {msg.thinking}
-                    </div>
-                  </details>
-                )}
-
-                {/* Ação rápida: transferir plano para Execução */}
-                {!msg.streaming && (
-                  <div className="pt-1.5 border-t border-[var(--border)]/60 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => handleTransferToExecution(rawContent)}
-                      className="flex items-center gap-1 text-[10.5px] font-semibold text-[var(--accent)] hover:underline cursor-pointer"
-                    >
-                      <span>Levar plano para Execução</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-              </div>
+                msg={msg}
+                fullModelTooltip={fullModelTooltip}
+                onTransferToExecution={handleTransferToExecution}
+              />
             );
           }
 
